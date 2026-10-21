@@ -42,6 +42,18 @@ That covers:
 
 When copying code, rename all of these to this project's own naming.
 
+## Decisions while coding
+
+When implementing, if a feature needs a decision that is critical for the product, do not
+decide it yourself. Ask the user first:
+
+- Explain the decision briefly and why it matters.
+- Give the options, each with its trade-off.
+- Mark one option as **recommended** and say why.
+
+Small implementation details that don't change the product's behaviour can be decided
+without asking, following the plan and the existing code.
+
 ## Git workflow
 
 - `develop` is the base branch. Always start from the latest `develop`
