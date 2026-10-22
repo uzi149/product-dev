@@ -1,0 +1,18 @@
+# RTSP only. The MVP has no live video in the browser, so the other protocols are off.
+# No authentication: the services are bound to 127.0.0.1 by default (ADR 0004).
+logLevel: info
+
+rtsp: yes
+rtspAddress: :8554
+protocols: [tcp]
+
+rtmp: no
+hls: no
+webrtc: no
+srt: no
+api: no
+metrics: no
+pprof: no
+
+paths:
+  all_others:

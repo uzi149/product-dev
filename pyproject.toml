@@ -46,6 +46,7 @@ include = ["services*", "shared*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["integration: needs the Docker Compose services running"]
 
 [tool.ruff]
 line-length = 100

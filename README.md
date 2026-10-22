@@ -79,6 +79,37 @@ pip install -r requirements.lock
 pip install -e . --no-deps
 ```
 
+## Run the infrastructure
+
+PostgreSQL (pgvector), MinIO, Redis and MediaMTX run in Docker Compose. The Python services
+and the frontend run natively. Requires Docker Desktop.
+
+```bash
+copy .env.example .env            # Windows (cp on Linux / macOS); edit if needed
+docker compose up -d
+docker compose ps                 # postgres, minio, redis healthy; minio-init "Exited (0)"
+```
+
+| Service | Address (this machine only) |
+|---|---|
+| PostgreSQL | `localhost:5433` (host port 5433 so it doesn't clash with a local PostgreSQL) |
+| MinIO API / console | `localhost:9000` / http://localhost:9001 (bucket `sentinel`) |
+| Redis | `localhost:6380` |
+| MediaMTX (RTSP) | `rtsp://localhost:8554` |
+
+Ports listen on `127.0.0.1` only. To allow other machines (e.g. real cameras), set
+`BIND_ADDRESS` in `.env` and change the default passwords first.
+
+Check it works: `pytest tests/infrastructure` (skipped when the services are down).
+
+```bash
+docker compose down               # stop; data is kept in Docker volumes
+docker compose down -v            # stop and delete all data
+```
+
+Settings (connections and the ingestion values from the scope §7.2) are read from `.env`
+by `shared/config.py`.
+
 ## Git workflow
 
 - `develop` is the base branch. Start every piece of work from the latest `develop`
