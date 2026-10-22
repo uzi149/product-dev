@@ -1,4 +1,4 @@
-"""Fixtures for database tests. They use a scratch database, never the development one."""
+"""Shared fixtures. Database tests use a scratch database, never the development one."""
 
 from pathlib import Path
 
@@ -13,12 +13,13 @@ from sqlalchemy.orm import Session
 from shared.config import Settings
 
 TEST_DB = "sentinel_test"
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def pytest_collection_modifyitems(items):
     for item in items:
-        if "tests/database" in item.nodeid.replace("\\", "/"):
+        node = item.nodeid.replace("\\", "/")
+        if node.startswith(("tests/database", "tests/api")):
             item.add_marker(pytest.mark.integration)
 
 

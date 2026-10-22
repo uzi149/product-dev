@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     minio_bucket: str = "sentinel"
     minio_host: str = "127.0.0.1"
     minio_port: int = 9000
+    # Address browsers use to reach MinIO (presigned URLs). Empty = same as the API's address.
+    minio_public_endpoint: str = ""
 
     # Redis
     redis_host: str = "127.0.0.1"
@@ -36,8 +38,12 @@ class Settings(BaseSettings):
     mediamtx_host: str = "127.0.0.1"
     mediamtx_rtsp_port: int = 8554
 
-    # Encrypts camera source URIs (used from step 1.4)
+    # Encrypts camera source URIs (ADR 0008)
     fernet_key: str = ""
+
+    # API
+    max_upload_mb: int = Field(default=2048, gt=0)
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
     # Ingestion and analysis (Technical Scope §7.2)
     analysis_fps: int = Field(default=1, gt=0)
@@ -70,8 +76,16 @@ class Settings(BaseSettings):
         )
 
     @property
+    def cors_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
     def minio_endpoint(self) -> str:
         return f"{self.minio_host}:{self.minio_port}"
+
+    @property
+    def minio_signing_endpoint(self) -> str:
+        return self.minio_public_endpoint or self.minio_endpoint
 
     @property
     def redis_url(self) -> str:

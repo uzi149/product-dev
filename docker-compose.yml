@@ -32,7 +32,6 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-sentinel_dev_password}
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:${MINIO_PORT:-9000}:9000"
-      - "${BIND_ADDRESS:-127.0.0.1}:${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio_data:/bitnami/minio/data
     healthcheck:

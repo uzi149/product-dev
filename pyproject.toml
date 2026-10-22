@@ -22,6 +22,8 @@ dependencies = [
     # Storage and queue
     "minio>=7.2",
     "redis>=5.0",
+    # Encrypts camera source URIs
+    "cryptography>=43",
     # Video
     "opencv-python>=4.10",
     "numpy>=1.26",
@@ -54,3 +56,7 @@ markers = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI dependency declarations in argument defaults are the intended usage.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.File", "fastapi.Form"]
