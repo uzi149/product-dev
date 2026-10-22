@@ -18,22 +18,22 @@ class Settings(BaseSettings):
     postgres_user: str = "sentinel"
     postgres_password: str = "sentinel_dev_password"
     postgres_db: str = "sentinel"
-    postgres_host: str = "localhost"
+    postgres_host: str = "127.0.0.1"
     postgres_port: int = 5433
 
     # MinIO
     minio_access_key: str = "sentinel"
     minio_secret_key: str = "sentinel_dev_password"
     minio_bucket: str = "sentinel"
-    minio_host: str = "localhost"
+    minio_host: str = "127.0.0.1"
     minio_port: int = 9000
 
     # Redis
-    redis_host: str = "localhost"
+    redis_host: str = "127.0.0.1"
     redis_port: int = 6380
 
     # MediaMTX (RTSP server)
-    mediamtx_host: str = "localhost"
+    mediamtx_host: str = "127.0.0.1"
     mediamtx_rtsp_port: int = 8554
 
     # Encrypts camera source URIs (used from step 1.4)

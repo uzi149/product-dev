@@ -58,10 +58,10 @@ def test_invalid_values_are_rejected(settings, overrides):
 
 def test_connection_urls(settings):
     s = settings(postgres_password="p@ss/word")
-    assert s.database_url == "postgresql+psycopg://sentinel:p%40ss%2Fword@localhost:5433/sentinel"
-    assert s.minio_endpoint == "localhost:9000"
-    assert s.redis_url == "redis://localhost:6380/0"
-    assert s.mediamtx_rtsp_url == "rtsp://localhost:8554"
+    assert s.database_url == "postgresql+psycopg://sentinel:p%40ss%2Fword@127.0.0.1:5433/sentinel"
+    assert s.minio_endpoint == "127.0.0.1:9000"
+    assert s.redis_url == "redis://127.0.0.1:6380/0"
+    assert s.mediamtx_rtsp_url == "rtsp://127.0.0.1:8554"
 
 
 def test_get_settings_is_cached():
