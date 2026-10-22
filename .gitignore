@@ -27,5 +27,5 @@ var/
 # Build artifacts
 *.egg-info/
 
-# Internal working notes (not committed)
-docs/MVP-open-questions.md
+# Planning docs, ADRs and requirements (kept local, not pushed)
+docs/

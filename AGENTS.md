@@ -54,6 +54,29 @@ decide it yourself. Ask the user first:
 Small implementation details that don't change the product's behaviour can be decided
 without asking, following the plan and the existing code.
 
+## MVP workflow: plan each step before coding
+
+The MVP is built from `docs/MVP-implementation-plan.md`, one step (feature branch) at a
+time. For every step, follow this order:
+
+1. **Write the step plan first.** Before any code, create
+   `docs/plans/<step>-<branch-name>.md` (e.g. `docs/plans/1.1-infra-compose.md`). It
+   covers what will be built, the files involved, the tests, the acceptance check and the
+   open questions for that step.
+2. **Settle the questions.** Ask the user every product-critical question, following
+   "Decisions while coding" above (options + a recommended one).
+3. **Record decisions as ADRs.** Write each settled decision in `docs/ADRs/` as
+   `NNNN-short-title.md` (e.g. `0001-docker-for-infrastructure.md`) with: context,
+   options considered, decision, consequences. Link every ADR from the step plan.
+4. **Update the MVP plan.** Change the matching step in
+   `docs/MVP-implementation-plan.md` to reflect the decisions, and link the step plan
+   and its ADRs from it.
+5. **Get approval, then code.** Start coding only after the user approves the step plan.
+   Commit the step plan and ADRs on the same feature branch as the code.
+
+If a new decision comes up while coding, stop, ask, then add the ADR and update both plans
+before continuing.
+
 ## Git workflow
 
 - `develop` is the base branch. Always start from the latest `develop`
