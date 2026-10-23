@@ -1,0 +1,8 @@
+# Test videos stay on this machine (MVP plan section 5); only the ground-truth YAML files
+# next to them are committed.
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+*.jpg

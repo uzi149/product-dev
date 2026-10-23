@@ -1,0 +1,86 @@
+# Sentinel infrastructure. The Python services and the frontend run natively (see README).
+# All ports are published on BIND_ADDRESS (default 127.0.0.1 = this machine only).
+
+name: sentinel
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.0-pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sentinel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sentinel_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-sentinel}
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    mem_limit: 1g
+
+  minio:
+    # The official minio/minio images are no longer published; see docs/ADRs/0005.
+    image: bitnamilegacy/minio:2025.7.23
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-sentinel}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-sentinel_dev_password}
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${MINIO_PORT:-9000}:9000"
+    volumes:
+      - minio_data:/bitnami/minio/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    mem_limit: 512m
+
+  # One-shot: creates the bucket, then exits with code 0.
+  minio-init:
+    image: bitnamilegacy/minio:2025.7.23
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-sentinel}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-sentinel_dev_password}
+      MINIO_BUCKET: ${MINIO_BUCKET:-sentinel}
+    volumes:
+      - ./infrastructure/minio/create-bucket.sh:/create-bucket.sh:ro
+    entrypoint: ["/bin/sh", "/create-bucket.sh"]
+    restart: "no"
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${REDIS_PORT:-6380}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    mem_limit: 256m
+
+  # The image has no shell, so there is no container healthcheck; tests check the port.
+  mediamtx:
+    image: bluenviron/mediamtx:1.11.3
+    restart: unless-stopped
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${MEDIAMTX_RTSP_PORT:-8554}:8554"
+    volumes:
+      - ./infrastructure/mediamtx/mediamtx.yml:/mediamtx.yml:ro
+    mem_limit: 256m
+
+volumes:
+  postgres_data:
+  minio_data:
+  redis_data:
