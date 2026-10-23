@@ -8,6 +8,7 @@ const API = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 const unique = () => `e2e-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 
 let videoPath = "";
+let stillPath = "";
 
 test.beforeAll(async () => {
   try {
@@ -23,13 +24,21 @@ test.beforeAll(async () => {
   // A test video made with ffmpeg, so no video file is committed: a still grey scene for
   // 40 s with a moving pattern from 15 s to 20 s (gone at 21 s). Only 5-31 s (activity + 10 s
   // pre/post roll) should be stored.
-  videoPath = path.join(mkdtempSync(path.join(tmpdir(), "sentinel-e2e-")), "clip.mp4");
+  const folder = mkdtempSync(path.join(tmpdir(), "sentinel-e2e-"));
+  videoPath = path.join(folder, "clip.mp4");
   execFileSync("ffmpeg", [
     "-y", "-v", "error",
     "-f", "lavfi", "-i", "color=c=gray:size=640x360:rate=15:duration=40",
     "-f", "lavfi", "-i", "testsrc=size=160x120:rate=15:duration=40",
     "-filter_complex", "[0][1]overlay=x='60*(t-15)':y=120:enable='between(t,15,20)'",
     "-c:v", "libx264", "-pix_fmt", "yuv420p", "-t", "40", videoPath,
+  ]);
+  // 20 s of an empty grey scene with sensor-like noise: nothing happens, nothing is stored.
+  stillPath = path.join(folder, "still.mp4");
+  execFileSync("ffmpeg", [
+    "-y", "-v", "error",
+    "-f", "lavfi", "-i", "color=c=gray:size=640x360:rate=15:duration=20,noise=alls=8:allf=t",
+    "-c:v", "libx264", "-pix_fmt", "yuv420p", stillPath,
   ]);
 });
 
@@ -95,6 +104,24 @@ test("add a camera, upload a video, and play the active part that was stored", a
       timeout: 30_000,
     })
     .toBe(640);
+});
+
+test("a video where nothing happens stores no footage", async ({ page }) => {
+  const name = unique();
+  await addCamera(page, name);
+
+  const upload = page.locator("section", { hasText: "Upload a video" });
+  await upload.getByLabel("Video file").setInputFiles(stillPath);
+  await upload.getByRole("button", { name: "Upload", exact: true }).click();
+  await expect(upload.getByRole("status")).toContainText(
+    "still.mp4: No activity found in this video",
+    { timeout: 120_000 },
+  );
+  await expect(
+    page.locator("section", { hasText: "Recent uploads" }).getByRole("listitem"),
+  ).toContainText("done");
+  await expect(page.getByText("No footage stored for this camera yet.")).toBeVisible();
+  await expect(page.getByRole("listitem").filter({ hasText: name })).toContainText("0 segments");
 });
 
 test("an invalid upload shows the API's error and stores nothing", async ({ page }) => {
