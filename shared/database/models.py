@@ -160,6 +160,28 @@ class StaticPeriod(Base):
     health_status: Mapped[str] = mapped_column(String(20), server_default=HealthStatus.OK.value)
 
 
+class Upload(Base):
+    """An uploaded file and its background ingestion (ADR 0013). `status` is the job state."""
+
+    __tablename__ = "uploads"
+    __table_args__ = (
+        _one_of("status", ProcessingStatus, "status"),
+        Index("ix_uploads_camera_id_created_at", "camera_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    camera_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("cameras.id", ondelete="CASCADE"))
+    filename: Mapped[str] = mapped_column(Text)
+    # The start time the operator entered for the file.
+    start_time: Mapped[datetime] = _timestamp()
+    status: Mapped[str] = mapped_column(String(20), server_default=ProcessingStatus.PENDING.value)
+    segments_created: Mapped[int | None] = mapped_column(Integer)
+    static_periods_created: Mapped[int | None] = mapped_column(Integer)
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()
+    finished_at: Mapped[datetime | None] = _timestamp(nullable=True)
+
+
 class AnalysisWindow(Base):
     """camera_id is repeated here so camera + time filters need no join (scope §5.3)."""
 

@@ -106,3 +106,72 @@ def to_h264_mp4(src: str | Path, dst: str | Path, info: VideoInfo | None = None)
     )
     if result.returncode != 0:
         raise FFmpegError(f"ffmpeg failed: {result.stderr.strip()[-300:]}")
+
+
+def _seconds(value: float) -> str:
+    return f"{value:.3f}"
+
+
+def cut_h264(src: str | Path, dst: str | Path, start_s: float, end_s: float) -> None:
+    """Write [start_s, end_s] of `src` as a browser-playable H.264 MP4 (no audio).
+
+    Always re-encodes: a stream copy can only start at a keyframe, which would shift the
+    start by up to several seconds and make the stored time wrong.
+    """
+    if end_s <= start_s:
+        raise ValueError("end_s must be after start_s")
+    result = _run(
+        [
+            _require("ffmpeg"),
+            "-y",
+            "-v",
+            "error",
+            "-ss",
+            _seconds(start_s),
+            "-i",
+            str(src),
+            "-t",
+            _seconds(end_s - start_s),
+            "-map",
+            "0:v:0",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "23",
+            "-pix_fmt",
+            "yuv420p",
+            "-an",
+            "-movflags",
+            "+faststart",
+            str(dst),
+        ]
+    )
+    if result.returncode != 0:
+        raise FFmpegError(f"ffmpeg could not cut the video: {result.stderr.strip()[-300:]}")
+
+
+def extract_frame_jpeg(src: str | Path, t_s: float, dst: str | Path) -> None:
+    """Save the frame at `t_s` seconds as a JPEG."""
+    result = _run(
+        [
+            _require("ffmpeg"),
+            "-y",
+            "-v",
+            "error",
+            "-ss",
+            _seconds(t_s),
+            "-i",
+            str(src),
+            "-frames:v",
+            "1",
+            "-q:v",
+            "3",
+            str(dst),
+        ]
+    )
+    if result.returncode != 0 or not Path(dst).exists():
+        raise FFmpegError(
+            f"ffmpeg could not read a frame at {t_s:.1f} s: {result.stderr.strip()[-300:]}"
+        )

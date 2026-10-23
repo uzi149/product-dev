@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { CameraFormDialog } from "@/components/cameras/camera-form-dialog";
 import { SegmentsPanel } from "@/components/cameras/segments-panel";
 import { UploadCard } from "@/components/cameras/upload-card";
+import { RecentUploads } from "@/components/cameras/recent-uploads";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -39,7 +40,7 @@ export default function CamerasPage() {
       <PageHeader
         eyebrow="System"
         title="Cameras"
-        description="Add live streams or file cameras, upload recordings with their start time, and play back what was stored."
+        description="Add live streams or file cameras, upload recordings with their start time, and play back the active parts that were stored."
         actions={
           <Button size="lg" onClick={() => setAdding(true)}>
             <Plus /> Add camera
@@ -122,6 +123,7 @@ export default function CamerasPage() {
           {selected && (
             <div className="grid min-w-0 content-start gap-4">
               <UploadCard key={`upload-${selected.id}`} camera={selected} />
+              <RecentUploads key={`uploads-${selected.id}`} camera={selected} />
               <SegmentsPanel key={`segments-${selected.id}`} camera={selected} />
             </div>
           )}

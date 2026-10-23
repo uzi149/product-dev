@@ -1,5 +1,6 @@
 """Shared fixtures. Database tests use a scratch database, never the development one."""
 
+import socket
 from pathlib import Path
 
 import psycopg
@@ -11,6 +12,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from shared.config import Settings
+from shared.storage import StorageClient
 
 TEST_DB = "sentinel_test"
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,7 +21,14 @@ ROOT = Path(__file__).resolve().parents[1]
 def pytest_collection_modifyitems(items):
     for item in items:
         node = item.nodeid.replace("\\", "/")
-        if node.startswith(("tests/database", "tests/api")):
+        if node.startswith(
+            (
+                "tests/database",
+                "tests/api",
+                "tests/ingestion/test_file_ingest",
+                "tests/ingestion/test_tasks",
+            )
+        ):
             item.add_marker(pytest.mark.integration)
 
 
@@ -86,3 +95,16 @@ def engine(migrated_db):
 def session(engine):
     with Session(engine) as session:
         yield session
+
+
+@pytest.fixture
+def storage():
+    """The real MinIO from Docker Compose (the development bucket)."""
+    settings = Settings()
+    try:
+        socket.create_connection((settings.minio_host, settings.minio_port), timeout=2).close()
+    except OSError:
+        pytest.skip("MinIO is not reachable (run `docker compose up -d`)")
+    client = StorageClient(settings)
+    client.ensure_bucket()
+    return client

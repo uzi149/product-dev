@@ -142,9 +142,26 @@ uvicorn services.api.main:app --reload     # http://127.0.0.1:8000  (docs at /do
 ```
 
 - `POST /cameras`, `GET /cameras`, `PATCH /cameras/{id}`, `POST /cameras/{id}/test-connection`
-- `POST /videos/upload` (camera, start time with timezone, MP4): the file is converted to
-  browser-playable H.264 (audio dropped), stored in MinIO and recorded as one segment
+- `POST /videos/upload` (camera, start time with timezone, video file): the file is checked
+  straight away, staged in MinIO and queued (`202`). A worker keeps only the parts with
+  activity (plus 10 s before and after), as browser-playable H.264 segments; the still parts
+  become static periods with a reference frame
+- `GET /videos/uploads?camera_id=`, `GET /videos/uploads/{id}`: upload status (`pending`,
+  `processing`, `done`, `failed`) with the number of parts stored or the error
 - `GET /segments`, `GET /segments/{id}`, `GET /segments/{id}/playback`
+- `GET /static-periods`, `GET /static-periods/{id}/reference-frame`
+
+## Run a worker
+
+Uploads are processed in the background by a Celery worker (ADR 0011), using Redis from the
+Docker stack as the queue. Needs FFmpeg on `PATH`, like the API.
+
+```bash
+celery -A shared.jobs.celery_app worker --pool=solo -Q default
+```
+
+`--pool=solo` is needed on Windows. Without a running worker, uploads stay `pending` and are
+processed as soon as one starts.
 
 Camera source URIs are encrypted with `FERNET_KEY` and never returned by the API. The key in
 `.env.example` is a **shared development key**: generate a private one
@@ -176,14 +193,15 @@ npm install
 npm run dev                          # http://localhost:3000 (the next free port if 3000 is taken)
 ```
 
-The UI follows the Sentinel prototype (dark theme). Only the **Cameras** screen works in
-Phase 1: add a camera, upload an MP4 with its start time, list the stored segments and play
-them. The other screens are placeholders that say which phase builds them.
+The UI follows the Sentinel prototype (dark theme). Only the **Cameras** screen works so far:
+add a camera, upload a video with its start time, follow its processing under "Recent
+uploads", and play the stored segments. The other screens are placeholders that say which
+phase builds them.
 
 Checks: `npm run lint`, `npm test` (unit tests), `npm run build`. CI runs these.
 
 End-to-end tests (Playwright, real Chrome) drive the whole stack: start the Docker stack, run
-the migrations and start the API first, then `npm run e2e` (it starts its own dev server on
+the migrations and start the API and a worker first, then `npm run e2e` (it starts its own dev server on
 port 3100 and needs FFmpeg on `PATH`). They are not part of CI. They create cameras named
 `e2e-...` in the development database; there is no delete endpoint yet, so remove them by hand
 if they bother you.

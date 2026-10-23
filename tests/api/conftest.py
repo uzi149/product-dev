@@ -1,7 +1,6 @@
 """API tests: FastAPI TestClient + scratch database + the real MinIO."""
 
 import shutil
-import socket
 import subprocess
 from pathlib import Path
 
@@ -11,11 +10,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from services.api.deps import get_session, get_storage_client
+from services.api.deps import get_session, get_storage_client, get_upload_queue
 from services.api.main import create_app
-from shared.config import Settings, get_settings
-from shared.database.models import Camera
-from shared.storage import StorageClient
+from shared.config import get_settings
+from shared.database.models import Camera, Upload
+from shared.storage.keys import upload_key
 
 FFMPEG = shutil.which("ffmpeg")
 
@@ -29,19 +28,13 @@ def fernet_key(monkeypatch):
 
 
 @pytest.fixture
-def storage():
-    settings = Settings()
-    try:
-        socket.create_connection((settings.minio_host, settings.minio_port), timeout=2).close()
-    except OSError:
-        pytest.skip("MinIO is not reachable (run `docker compose up -d`)")
-    client = StorageClient(settings)
-    client.ensure_bucket()
-    return client
+def queued():
+    """Upload ids the API queued for ingestion (no Redis or worker needed)."""
+    return []
 
 
 @pytest.fixture
-def client(engine, storage):
+def client(engine, storage, queued):
     app = create_app()
 
     def db_session():
@@ -50,12 +43,17 @@ def client(engine, storage):
 
     app.dependency_overrides[get_session] = db_session
     app.dependency_overrides[get_storage_client] = lambda: storage
+    app.dependency_overrides[get_upload_queue] = lambda: queued.append
     with TestClient(app) as test_client:
         yield test_client
-    # Remove every object the test created (segments are stored under the camera id).
+    # Remove every object the test created: segments and static frames are stored under the
+    # camera id, staged uploads under the upload id.
     with Session(engine) as session:
         for camera_id in session.scalars(select(Camera.id)):
             storage.delete_prefix(f"segments/{camera_id}/")
+            storage.delete_prefix(f"static/{camera_id}/")
+        for upload_id in session.scalars(select(Upload.id)):
+            storage.delete(upload_key(upload_id))
 
 
 def make_video(path: Path, codec: str = "libx264", seconds: int = 3, extra: tuple = ()) -> Path:

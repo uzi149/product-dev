@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from services.api.routers import cameras, health, segments, videos
+from services.api.routers import cameras, health, segments, static_periods, videos
 from shared.config import get_settings
 from shared.crypto import check_key
 
@@ -26,7 +26,7 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    for module in (health, cameras, videos, segments):
+    for module in (health, cameras, videos, segments, static_periods):
         app.include_router(module.router)
     return app
 

@@ -16,14 +16,20 @@ test.beforeAll(async () => {
   } catch {
     throw new Error(
       `The API is not running at ${API}. Start the stack first: docker compose up -d, ` +
-        "alembic upgrade head, uvicorn services.api.main:app",
+        "alembic upgrade head, uvicorn services.api.main:app, and a worker: " +
+        "celery -A shared.jobs.celery_app worker --pool=solo -Q default",
     );
   }
-  // A small test video made with ffmpeg, so no video file is committed.
+  // A test video made with ffmpeg, so no video file is committed: a still grey scene for
+  // 40 s with a moving pattern from 15 s to 20 s (gone at 21 s). Only 5-31 s (activity + 10 s
+  // pre/post roll) should be stored.
   videoPath = path.join(mkdtempSync(path.join(tmpdir(), "sentinel-e2e-")), "clip.mp4");
   execFileSync("ffmpeg", [
-    "-y", "-v", "error", "-f", "lavfi", "-i", "testsrc=duration=5:size=640x360:rate=15",
-    "-c:v", "libx264", "-pix_fmt", "yuv420p", videoPath,
+    "-y", "-v", "error",
+    "-f", "lavfi", "-i", "color=c=gray:size=640x360:rate=15:duration=40",
+    "-f", "lavfi", "-i", "testsrc=size=160x120:rate=15:duration=40",
+    "-filter_complex", "[0][1]overlay=x='60*(t-15)':y=120:enable='between(t,15,20)'",
+    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-t", "40", videoPath,
   ]);
 });
 
@@ -58,19 +64,25 @@ test("the shell shows every screen in the sidebar and the API health", async ({ 
   }
 });
 
-test("add a camera, upload an MP4 with a start time, and play it", async ({ page }) => {
+test("add a camera, upload a video, and play the active part that was stored", async ({ page }) => {
   const name = unique();
   await addCamera(page, name);
 
-  const upload = page.locator("section", { hasText: "Upload an MP4" });
+  const upload = page.locator("section", { hasText: "Upload a video" });
   await upload.getByLabel("Video file").setInputFiles(videoPath);
   await upload.getByLabel(/Recording started/).fill("2026-03-07T09:05");
   await upload.getByRole("button", { name: "Upload", exact: true }).click();
-  await expect(page.getByText("Video uploaded")).toBeVisible({ timeout: 60_000 });
+  // Processed in the background by the worker.
+  await expect(upload.getByRole("status")).toContainText("clip.mp4: 1 active part stored", {
+    timeout: 120_000,
+  });
+  const recent = page.locator("section", { hasText: "Recent uploads" }).getByRole("listitem");
+  await expect(recent).toHaveCount(1);
+  await expect(recent).toContainText("done");
 
   const row = page.locator("section", { hasText: "Stored segments" }).getByRole("listitem");
   await expect(row).toHaveCount(1);
-  await expect(row).toContainText("0:05");
+  await expect(row).toContainText("0:26");
   await expect(row).toContainText("640×360");
   await expect(row).toContainText("h264");
   await expect(row).toContainText("Mar 07, 2026"); // shown in local time, same day in any timezone offset <= 9h
@@ -89,7 +101,7 @@ test("an invalid upload shows the API's error and stores nothing", async ({ page
   const name = unique();
   await addCamera(page, name);
 
-  const upload = page.locator("section", { hasText: "Upload an MP4" });
+  const upload = page.locator("section", { hasText: "Upload a video" });
   await upload.getByLabel("Video file").setInputFiles({
     name: "notes.mp4",
     mimeType: "video/mp4",

@@ -18,6 +18,7 @@ EXPECTED_TABLES = {
     "event_evidence",
     "query_sessions",
     "query_results",
+    "uploads",
 }
 
 
@@ -66,5 +67,13 @@ def test_indexes_from_scope_5_3_exist(engine):
         "ix_events_trigger_id",
         "ix_events_camera_id_start_time",
         "ix_trigger_cameras_camera_id",
+        "ix_uploads_camera_id_created_at",
     ):
         assert expected in defs, expected
+
+
+def test_uploads_migration_downgrades_on_its_own(migrated_db, alembic_config):
+    command.downgrade(alembic_config, "0001")
+    assert _tables(migrated_db) == EXPECTED_TABLES - {"uploads"}
+    command.upgrade(alembic_config, "head")
+    assert "uploads" in _tables(migrated_db)
