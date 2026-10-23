@@ -3,7 +3,9 @@ from typing import Any, Literal
 from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from shared.schemas.detection import normalise_detection_config
 
 SourceType = Literal["rtsp", "file"]
 _RTSP_SCHEMES = ("rtsp://", "rtsps://")
@@ -40,6 +42,11 @@ class CameraCreate(BaseModel):
     analysis_fps: int = Field(default=1, ge=1, le=30)
     detection_config: dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator("detection_config")
+    @classmethod
+    def _check_detection_config(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return normalise_detection_config(value)
+
     @model_validator(mode="after")
     def _uri_matches_type(self) -> "CameraCreate":
         _check_uri(self.source_type, self.source_uri)
@@ -55,6 +62,11 @@ class CameraUpdate(BaseModel):
     retention_days: int | None = Field(default=None, ge=1, le=3650)
     analysis_fps: int | None = Field(default=None, ge=1, le=30)
     detection_config: dict[str, Any] | None = None
+
+    @field_validator("detection_config")
+    @classmethod
+    def _check_detection_config(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        return None if value is None else normalise_detection_config(value)
 
 
 class CameraRead(BaseModel):

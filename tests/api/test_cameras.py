@@ -89,6 +89,23 @@ def test_patch_rejects_bad_input(client):
     )
 
 
+def test_detection_config_is_validated_and_stored(client):
+    masks = [[[0, 0], [0.25, 0], [0.25, 1]]]
+    camera = create(client, detection_config={"changed_fraction": 0.02, "masks": masks}).json()
+    assert camera["detection_config"] == {"changed_fraction": 0.02, "masks": masks}
+
+    url = f"/cameras/{camera['id']}"
+    updated = client.patch(url, json={"detection_config": {"ssim_threshold": 0.6}}).json()
+    assert updated["detection_config"] == {"ssim_threshold": 0.6}
+
+    assert create(client, detection_config={"threshold": 1}).status_code == 422
+    assert create(client, detection_config={"masks": [[[0, 0], [1, 1]]]}).status_code == 422
+    response = client.patch(url, json={"detection_config": {"changed_fraction": 2}})
+    assert response.status_code == 422
+    assert "invalid detection_config" in response.text
+    assert client.patch(url, json={"detection_config": None}).status_code == 422
+
+
 def test_unknown_camera_is_404(client):
     missing = "00000000-0000-0000-0000-000000000000"
     assert client.get(f"/cameras/{missing}").status_code == 404

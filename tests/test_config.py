@@ -25,6 +25,16 @@ def test_scope_defaults(settings):
     assert s.default_retention_days == 14
 
 
+def test_change_detection_defaults(settings):
+    s = settings()
+    assert s.detect_pixel_delta == 25
+    assert s.detect_changed_fraction == 0.005
+    assert s.detect_ssim_threshold == 0.7
+    assert s.detect_activation_samples == 2
+    assert s.detect_background_alpha == 0.05
+    assert s.detect_width == 320
+
+
 def test_environment_overrides_defaults(settings, monkeypatch):
     monkeypatch.setenv("ANALYSIS_WINDOW_SECONDS", "20")
     monkeypatch.setenv("POSTGRES_PORT", "6000")
@@ -49,6 +59,8 @@ def test_env_file_is_read(tmp_path, monkeypatch):
         {"pre_roll_seconds": 61},
         {"fragment_seconds": 0},
         {"analysis_fps": 0},
+        {"detect_changed_fraction": 0},
+        {"detect_ssim_threshold": 1.5},
     ],
 )
 def test_invalid_values_are_rejected(settings, overrides):

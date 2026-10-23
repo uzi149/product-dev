@@ -150,6 +150,21 @@ Camera source URIs are encrypted with `FERNET_KEY` and never returned by the API
 `.env.example` is a **shared development key**: generate a private one
 (command in `.env.example`) and re-enter the camera URIs before using real credentials.
 
+## Change detection
+
+Only footage where something happens is kept (ADR 0010). The defaults are the `DETECT_*`
+values in `.env.example`; a camera can override them, and add polygons to ignore, in its
+`detection_config` JSON, e.g.
+`{"changed_fraction": 0.01, "masks": [[[0, 0], [0.3, 0], [0.3, 0.4]]]}` (points are 0–1 of
+the image width/height).
+
+To see what the detector finds in a video, and to try other values:
+
+```bash
+python -m shared.video.detect test-data/camera-01/person-enters.mp4
+python -m shared.video.detect clip.mp4 --config "{\"changed_fraction\": 0.01}"
+```
+
 ## Run the UI
 
 Needs Node 24 and the API running (see above).

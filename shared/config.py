@@ -56,6 +56,15 @@ class Settings(BaseSettings):
     stable_timeout_seconds: int = Field(default=10, gt=0)
     health_snapshot_interval_seconds: int = Field(default=600, gt=0)
 
+    # Change detection defaults (ADR 0010); cameras override them in `detection_config`.
+    detect_pixel_delta: int = Field(default=25, ge=1, le=255)
+    detect_changed_fraction: float = Field(default=0.005, gt=0, le=1)
+    detect_ssim_threshold: float = Field(default=0.7, gt=0, le=1)
+    detect_activation_samples: int = Field(default=2, ge=1)
+    detect_background_alpha: float = Field(default=0.05, gt=0, le=1)
+    # Frames are downscaled to this width before they're compared.
+    detect_width: int = Field(default=320, ge=32)
+
     # MVP plan §2
     keyframes_per_window: int = Field(default=6, gt=0)
     default_retention_days: int = Field(default=14, gt=0)
