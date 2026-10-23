@@ -32,6 +32,7 @@ def test_other_keys():
     assert keys.static_frame_key(CAMERA, OTHER) == f"static/{CAMERA}/{OTHER}.jpg"
     assert keys.snapshot_key(CAMERA) == f"snapshots/{CAMERA}/latest.jpg"
     assert keys.export_key(OTHER) == f"exports/{OTHER}.mp4"
+    assert keys.upload_key(OTHER) == f"uploads/{OTHER}"
 
 
 def test_uri_round_trip():

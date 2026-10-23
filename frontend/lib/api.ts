@@ -5,6 +5,7 @@ import type {
   ConnectionTestResult,
   Health,
   Segment,
+  Upload,
 } from "./types";
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
@@ -62,12 +63,18 @@ export const api = {
     return request<Segment[]>(`/segments?${query}`);
   },
   playbackUrl: (segmentId: string) => `${API_URL}/segments/${segmentId}/playback`,
-  /** Uses XMLHttpRequest because fetch can't report upload progress. */
+  upload: (id: string) => request<Upload>(`/videos/uploads/${id}`),
+  uploads: (cameraId: string) =>
+    request<Upload[]>(`/videos/uploads?${new URLSearchParams({ camera_id: cameraId, limit: "10" })}`),
+  /**
+   * Sends the file for background ingestion; resolves with the queued upload (HTTP 202).
+   * Uses XMLHttpRequest because fetch can't report upload progress.
+   */
   uploadVideo: (
     args: { cameraId: string; startTimeIso: string; file: File },
     onProgress: (fraction: number) => void,
   ) =>
-    new Promise<Segment>((resolve, reject) => {
+    new Promise<Upload>((resolve, reject) => {
       const form = new FormData();
       form.set("camera_id", args.cameraId);
       form.set("start_time", args.startTimeIso);
@@ -87,7 +94,7 @@ export const api = {
           // not JSON
         }
         if (xhr.status >= 200 && xhr.status < 300) {
-          resolve(body as Segment);
+          resolve(body as Upload);
           return;
         }
         const detail = (body as { detail?: unknown } | null)?.detail;

@@ -1,6 +1,15 @@
+import cv2
 import pytest
 
-from shared.video.ffmpeg import FFmpegError, VideoInfo, parse_probe, probe, to_h264_mp4
+from shared.video.ffmpeg import (
+    FFmpegError,
+    VideoInfo,
+    cut_h264,
+    extract_frame_jpeg,
+    parse_probe,
+    probe,
+    to_h264_mp4,
+)
 from tests.api.conftest import make_video
 
 
@@ -59,3 +68,31 @@ def test_probe_of_garbage_fails(tmp_path):
     bogus.write_text("nope")
     with pytest.raises(FFmpegError):
         probe(bogus)
+
+
+def test_cut_is_exact_and_h264(tmp_path):
+    # Keyframes only every 10 s, so a stream copy could not start at 3.5 s.
+    source = make_video(tmp_path / "long.mp4", seconds=12, extra=("-g", "100"))
+    out = tmp_path / "cut.mp4"
+    cut_h264(source, out, 3.5, 7.5)
+    info = probe(out)
+    assert (info.codec, info.pix_fmt) == ("h264", "yuv420p")
+    assert abs(info.duration_s - 4.0) < 0.15
+
+
+def test_cut_needs_a_positive_length(tmp_path):
+    with pytest.raises(ValueError):
+        cut_h264(tmp_path / "a.mp4", tmp_path / "b.mp4", 5, 5)
+
+
+def test_extract_frame_jpeg(tmp_path):
+    source = make_video(tmp_path / "a.mp4", seconds=3)
+    frame = tmp_path / "frame.jpg"
+    extract_frame_jpeg(source, 1.5, frame)
+    assert cv2.imread(str(frame)).shape == (240, 320, 3)
+
+
+def test_extract_frame_past_the_end_fails(tmp_path):
+    source = make_video(tmp_path / "a.mp4", seconds=2)
+    with pytest.raises(FFmpegError):
+        extract_frame_jpeg(source, 30, tmp_path / "frame.jpg")

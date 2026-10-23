@@ -5,6 +5,7 @@ keyframes/{camera_id}/{window_id}/{n}.jpg
 static/{camera_id}/{static_period_id}.jpg
 snapshots/{camera_id}/latest.jpg
 exports/{event_id}.mp4
+uploads/{upload_id}          staged upload, deleted after ingestion (ADR 0012)
 """
 
 from datetime import UTC, datetime
@@ -33,3 +34,7 @@ def snapshot_key(camera_id: UUID) -> str:
 
 def export_key(event_id: UUID) -> str:
     return f"exports/{event_id}.mp4"
+
+
+def upload_key(upload_id: UUID) -> str:
+    return f"uploads/{upload_id}"
