@@ -152,6 +152,56 @@ def cut_h264(src: str | Path, dst: str | Path, start_s: float, end_s: float) -> 
         raise FFmpegError(f"ffmpeg could not cut the video: {result.stderr.strip()[-300:]}")
 
 
+def join_fragments(fragments: list[Path], dst: str | Path) -> VideoInfo:
+    """Join MPEG-TS fragments of a live stream into one browser-playable MP4 (no audio).
+
+    The video is copied when it is H.264 4:2:0 (the usual camera stream; many cameras flag it
+    full range, `yuvj420p`, which browsers play too), otherwise it is re-encoded. Returns the
+    probed result.
+    """
+    if not fragments:
+        raise ValueError("no fragments to join")
+    dst = Path(dst)
+    listing = dst.with_name(dst.stem + "-fragments.txt")
+    # The concat list escapes ' as '\'' and wants forward slashes.
+    lines = [
+        "file '{}'".format(Path(f).resolve().as_posix().replace("'", "'\\''")) for f in fragments
+    ]
+    listing.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    info = probe(fragments[0])
+    if info.codec == "h264" and info.pix_fmt in ("yuv420p", "yuvj420p"):
+        video = ["-c:v", "copy"]
+    else:
+        video = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p"]
+    try:
+        result = _run(
+            [
+                _require("ffmpeg"),
+                "-y",
+                "-v",
+                "error",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                str(listing),
+                "-map",
+                "0:v:0",
+                *video,
+                "-an",
+                "-movflags",
+                "+faststart",
+                str(dst),
+            ]
+        )
+    finally:
+        listing.unlink(missing_ok=True)
+    if result.returncode != 0:
+        raise FFmpegError(f"ffmpeg could not join the fragments: {result.stderr.strip()[-300:]}")
+    return probe(dst)
+
+
 def extract_frame_jpeg(src: str | Path, t_s: float, dst: str | Path) -> None:
     """Save the frame at `t_s` seconds as a JPEG."""
     result = _run(

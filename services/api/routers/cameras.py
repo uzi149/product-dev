@@ -1,25 +1,65 @@
 from uuid import UUID
 
+import redis
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from services.api.deps import get_session
+from services.api.deps import get_redis, get_session, get_storage_client
+from shared.camera_status import ingestion_running, read_statuses
 from shared.crypto import CryptoError, decrypt_text, encrypt_text
-from shared.database.models import Camera, VideoSegment
+from shared.database.models import Camera, SourceType, VideoSegment
 from shared.schemas.camera import (
     CameraCreate,
     CameraRead,
     CameraUpdate,
     ConnectionTestResult,
+    LiveStatus,
     mask_uri,
 )
+from shared.storage import StorageClient
+from shared.storage.keys import snapshot_key
 from shared.video.capture import check_connection
 
 router = APIRouter(prefix="/cameras", tags=["cameras"])
 
 
-def _read(camera: Camera, segment_count: int) -> CameraRead:
+def _live_statuses(client: redis.Redis, cameras: list[Camera]) -> dict[UUID, LiveStatus]:
+    """Status of every RTSP camera from Redis; file cameras have none."""
+    rtsp = [c for c in cameras if c.source_type == SourceType.RTSP]
+    if not rtsp:
+        return {}
+    try:
+        running = ingestion_running(client)
+        statuses = read_statuses(client, [c.id for c in rtsp if c.enabled]) if running else {}
+    except redis.RedisError:
+        running, statuses = None, {}
+    live = {}
+    for camera in rtsp:
+        status = statuses.get(camera.id)
+        if not camera.enabled:
+            live[camera.id] = LiveStatus(state="disabled")
+        elif running is None:
+            live[camera.id] = LiveStatus(state="unknown", error="Redis is not reachable")
+        elif not running:
+            live[camera.id] = LiveStatus(state="not_running")
+        elif status is None:
+            # Ingestion runs but hasn't picked the camera up yet (it reloads every 30 s).
+            live[camera.id] = LiveStatus(state="connecting")
+        else:
+            live[camera.id] = LiveStatus(
+                state=status.state.value,
+                since=status.since,
+                activity=status.activity,
+                last_frame_at=status.last_frame_at,
+                last_snapshot_at=status.last_snapshot_at,
+                error=status.error,
+            )
+    return live
+
+
+def _read(camera: Camera, segment_count: int, live: LiveStatus | None = None) -> CameraRead:
     masked = None
     if camera.source_uri_encrypted:
         try:
@@ -38,6 +78,7 @@ def _read(camera: Camera, segment_count: int) -> CameraRead:
         has_source_uri=camera.source_uri_encrypted is not None,
         source_uri_masked=masked,
         segment_count=segment_count,
+        live=live,
     )
 
 
@@ -55,7 +96,11 @@ def _get_camera(session: Session, camera_id: UUID) -> Camera:
 
 
 @router.post("", response_model=CameraRead, status_code=201)
-def create_camera(body: CameraCreate, session: Session = Depends(get_session)) -> CameraRead:
+def create_camera(
+    body: CameraCreate,
+    session: Session = Depends(get_session),
+    client: redis.Redis = Depends(get_redis),
+) -> CameraRead:
     camera = Camera(
         display_name=body.display_name,
         source_type=body.source_type,
@@ -68,29 +113,40 @@ def create_camera(body: CameraCreate, session: Session = Depends(get_session)) -
     session.add(camera)
     session.commit()
     session.refresh(camera)
-    return _read(camera, 0)
+    return _read(camera, 0, _live_statuses(client, [camera]).get(camera.id))
 
 
 @router.get("", response_model=list[CameraRead])
-def list_cameras(session: Session = Depends(get_session)) -> list[CameraRead]:
+def list_cameras(
+    session: Session = Depends(get_session), client: redis.Redis = Depends(get_redis)
+) -> list[CameraRead]:
     counts = dict(
         session.execute(
             select(VideoSegment.camera_id, func.count()).group_by(VideoSegment.camera_id)
         ).all()
     )
-    cameras = session.scalars(select(Camera).order_by(Camera.created_at, Camera.display_name))
-    return [_read(c, counts.get(c.id, 0)) for c in cameras]
+    cameras = list(session.scalars(select(Camera).order_by(Camera.created_at, Camera.display_name)))
+    live = _live_statuses(client, cameras)
+    return [_read(c, counts.get(c.id, 0), live.get(c.id)) for c in cameras]
 
 
 @router.get("/{camera_id}", response_model=CameraRead)
-def get_camera(camera_id: UUID, session: Session = Depends(get_session)) -> CameraRead:
+def get_camera(
+    camera_id: UUID,
+    session: Session = Depends(get_session),
+    client: redis.Redis = Depends(get_redis),
+) -> CameraRead:
     camera = _get_camera(session, camera_id)
-    return _read(camera, _segment_count(session, camera_id))
+    live = _live_statuses(client, [camera]).get(camera_id)
+    return _read(camera, _segment_count(session, camera_id), live)
 
 
 @router.patch("/{camera_id}", response_model=CameraRead)
 def update_camera(
-    camera_id: UUID, body: CameraUpdate, session: Session = Depends(get_session)
+    camera_id: UUID,
+    body: CameraUpdate,
+    session: Session = Depends(get_session),
+    client: redis.Redis = Depends(get_redis),
 ) -> CameraRead:
     camera = _get_camera(session, camera_id)
     changes = body.model_dump(exclude_unset=True)
@@ -109,7 +165,24 @@ def update_camera(
 
     session.commit()
     session.refresh(camera)
-    return _read(camera, _segment_count(session, camera_id))
+    live = _live_statuses(client, [camera]).get(camera_id)
+    return _read(camera, _segment_count(session, camera_id), live)
+
+
+@router.get("/{camera_id}/snapshot")
+def snapshot(
+    camera_id: UUID,
+    session: Session = Depends(get_session),
+    storage: StorageClient = Depends(get_storage_client),
+) -> RedirectResponse:
+    """Redirect to the latest snapshot (refreshed every 5 s while the camera is online)."""
+    _get_camera(session, camera_id)
+    key = snapshot_key(camera_id)
+    if not storage.exists(key):
+        raise HTTPException(404, "this camera has no snapshot yet")
+    return RedirectResponse(
+        storage.presigned_get_url(key), status_code=307, headers={"Cache-Control": "no-store"}
+    )
 
 
 @router.post("/{camera_id}/test-connection", response_model=ConnectionTestResult)

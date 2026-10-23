@@ -5,6 +5,7 @@ import type {
   ConnectionTestResult,
   Health,
   Segment,
+  StaticPeriod,
   Upload,
 } from "./types";
 
@@ -56,13 +57,23 @@ export const api = {
     request<Camera>(`/cameras/${id}`, json("PATCH", input)),
   testConnection: (id: string) =>
     request<ConnectionTestResult>(`/cameras/${id}/test-connection`, { method: "POST" }),
-  segments: (params: { cameraId: string; start?: string; end?: string }) => {
-    const query = new URLSearchParams({ camera_id: params.cameraId, limit: "200" });
+  segments: (params: { cameraId: string; start?: string; end?: string; limit?: number }) => {
+    const query = new URLSearchParams({ camera_id: params.cameraId, limit: String(params.limit ?? 200) });
     if (params.start) query.set("start", params.start);
     if (params.end) query.set("end", params.end);
     return request<Segment[]>(`/segments?${query}`);
   },
   playbackUrl: (segmentId: string) => `${API_URL}/segments/${segmentId}/playback`,
+  staticPeriods: (params: { cameraId: string; start?: string; end?: string }) => {
+    const query = new URLSearchParams({ camera_id: params.cameraId, limit: "500" });
+    if (params.start) query.set("start", params.start);
+    if (params.end) query.set("end", params.end);
+    return request<StaticPeriod[]>(`/static-periods?${query}`);
+  },
+  referenceFrameUrl: (periodId: string) => `${API_URL}/static-periods/${periodId}/reference-frame`,
+  /** `version` (the snapshot time) makes the browser load a new picture when it changes. */
+  snapshotUrl: (cameraId: string, version: string | null) =>
+    `${API_URL}/cameras/${cameraId}/snapshot${version ? `?v=${encodeURIComponent(version)}` : ""}`,
   upload: (id: string) => request<Upload>(`/videos/uploads/${id}`),
   uploads: (cameraId: string) =>
     request<Upload[]>(`/videos/uploads?${new URLSearchParams({ camera_id: cameraId, limit: "10" })}`),

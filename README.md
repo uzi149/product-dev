@@ -47,7 +47,8 @@ shared/
   video/            FFmpeg/OpenCV helpers
 frontend/           operator UI (Next.js)
 infrastructure/     postgres, mediamtx, minio configuration
-test-data/          camera-01/, camera-02/ test videos (video files are not committed)
+test-data/          camera-01/, camera-02/, sim/ test videos (video files are not committed)
+data/               live ingestion's rolling buffer and outbox (created at run time, git-ignored)
 tests/              ingestion, search, triggers, end_to_end
 docs/               requirements and ADRs (docs/ADRs/)
 ```
@@ -142,6 +143,12 @@ uvicorn services.api.main:app --reload     # http://127.0.0.1:8000  (docs at /do
 ```
 
 - `POST /cameras`, `GET /cameras`, `PATCH /cameras/{id}`, `POST /cameras/{id}/test-connection`
+- `GET /cameras` and `GET /cameras/{id}` include a `live` field for RTSP cameras (`null` for
+  file cameras): `state` (`online`, `connecting`, `offline`, `disabled`, `not_running` when live
+  ingestion isn't running, `unknown` when Redis is down), `since`, `activity`, `last_frame_at`,
+  `last_snapshot_at`, `error`
+- `GET /cameras/{id}/snapshot`: `307` to the camera's latest picture (refreshed every 5 s while
+  it is online), `404` when there is none yet
 - `POST /videos/upload` (camera, start time with timezone, video file): the file is checked
   straight away, staged in MinIO and queued (`202`). A worker keeps only the parts with
   activity (plus 10 s before and after), as browser-playable H.264 segments; the still parts
@@ -170,7 +177,10 @@ Camera source URIs are encrypted with `FERNET_KEY` and never returned by the API
 ## Change detection
 
 Only footage where something happens is kept (ADR 0010). The defaults are the `DETECT_*`
-values in `.env.example`; a camera can override them, and add polygons to ignore, in its
+values in `.env.example`. The default changed share is **0.1 %** of the picture
+(`DETECT_CHANGED_FRACTION=0.001`, lowered from 0.5 % because one person in a wide view covers
+only 0.05–0.3 %). The Celery worker reads it at start-up, so restart the worker after pulling
+this change. A camera can override the defaults, and add polygons to ignore, in its
 `detection_config` JSON, e.g.
 `{"changed_fraction": 0.01, "masks": [[[0, 0], [0.3, 0], [0.3, 0.4]]]}` (points are 0–1 of
 the image width/height).
@@ -181,6 +191,49 @@ To see what the detector finds in a video, and to try other values:
 python -m shared.video.detect test-data/camera-01/person-enters.mp4
 python -m shared.video.detect clip.mp4 --config "{\"changed_fraction\": 0.01}"
 ```
+
+## Live ingestion
+
+Live RTSP cameras are watched by their own process (ADR 0014). It needs the infrastructure
+running, the migrations applied and FFmpeg on `PATH`:
+
+```bash
+python -m services.ingestion
+```
+
+- It watches every **enabled RTSP camera** and reads the camera list again every 30 s, so
+  cameras added, disabled or edited in the UI are picked up without a restart.
+- Per camera, one FFmpeg process (one RTSP connection) records the stream into 5 s fragments
+  (copied, not re-encoded) and passes one frame per second to the change detector. Only the
+  activity is stored, with 10–15 s before and after (whole fragments). Long activity is stored
+  as back-to-back segments of about 30 s (ADR 0015). Still stretches become static periods with
+  a reference picture, and time while a camera is unreachable becomes an `offline` static period.
+- A dropped stream is retried after 1, 2, 5, 10 s, then every 30 s.
+- Footage waits in `data/outbox/` until MinIO and PostgreSQL have it, so short outages lose
+  nothing. Footage that can't be stored at all (damaged) is moved to `data/outbox-failed/`.
+  `data/` is git-ignored.
+- Camera status and the latest snapshot go to Redis and MinIO every 5 s; the Live cameras page
+  shows them.
+- Stop it with **Ctrl+C** (Ctrl+Break and SIGTERM work too): open segments are stored before it
+  exits. Only one can run at a time; a second one exits with a message.
+
+The settings are in the "Live ingestion" block of `.env.example`.
+
+### Simulated cameras
+
+The Compose profile `sim` adds two cameras that loop a video into MediaMTX:
+`rtsp://127.0.0.1:8554/cam-01` and `rtsp://127.0.0.1:8554/cam-02`.
+
+```bash
+python -m tests.ingestion.videos test-data/sim    # make the default clips (once; not committed)
+docker compose --profile sim up -d                # start sim-cam-01 and sim-cam-02
+```
+
+The default clips are 60 s with one burst of movement (`cam-01`) and 90 s with two (`cam-02`).
+To loop other videos instead, set `SIM_CAM01_VIDEO` / `SIM_CAM02_VIDEO` in `.env`. Add the two
+cameras on the Cameras page (type RTSP, the URLs above). To test a dropped stream, use
+`docker compose stop sim-cam-01`, then `docker compose start sim-cam-01`.
+`docker compose --profile sim down` stops everything, including the sim cameras.
 
 ## Run the UI
 
@@ -193,18 +246,26 @@ npm install
 npm run dev                          # http://localhost:3000 (the next free port if 3000 is taken)
 ```
 
-The UI follows the Sentinel prototype (dark theme). Only the **Cameras** screen works so far:
-add a camera, upload a video with its start time, follow its processing under "Recent
-uploads", and play the stored segments. The other screens are placeholders that say which
-phase builds them.
+The UI follows the Sentinel prototype (dark theme). What works so far:
+
+- **Cameras:** add a camera, upload a video with its start time, follow its processing under
+  "Recent uploads", and play the stored segments. A camera's **timeline** shows stored
+  segments, static periods and offline stretches for the last hour, 6 hours, 24 hours or a
+  chosen day; click a segment to play it.
+- **Live cameras:** the latest picture of every RTSP camera, refreshed every 5 s, with its
+  status (Live, Connecting, Offline, Disabled) and an Activity marker. It says so when live
+  ingestion isn't running. A tile opens that camera's timeline.
+
+The other screens are placeholders that say which phase builds them.
 
 Checks: `npm run lint`, `npm test` (unit tests), `npm run build`. CI runs these.
 
-End-to-end tests (Playwright, real Chrome) drive the whole stack: start the Docker stack, run
-the migrations and start the API and a worker first, then `npm run e2e` (it starts its own dev server on
-port 3100 and needs FFmpeg on `PATH`). They are not part of CI. They create cameras named
-`e2e-...` in the development database; there is no delete endpoint yet, so remove them by hand
-if they bother you.
+End-to-end tests (Playwright, real Chrome) drive the whole stack: start the Docker stack with
+the sim cameras (`docker compose --profile sim up -d`), run the migrations and start the API, a
+worker and live ingestion first, then `npm run e2e` (it starts its own dev server on port 3100
+and needs FFmpeg on `PATH`). They are not part of CI. They create cameras named `e2e-...` in the
+development database. There is no delete endpoint yet, so remove them by hand if they bother
+you. The RTSP cameras they make are disabled at the end, so live ingestion stops reading them.
 
 ## Git workflow
 

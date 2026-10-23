@@ -1,6 +1,11 @@
 import time
+from datetime import UTC, datetime
+from uuid import UUID, uuid4
 
 from sqlalchemy import text
+
+from shared.camera_status import CameraStatus, HeartbeatLock, LiveState, write_status
+from shared.storage.keys import snapshot_key
 
 RTSP = "rtsp://admin:s3cret@192.168.1.10:554/stream1?token=abc"
 
@@ -144,3 +149,59 @@ def test_cors_allows_the_dev_server_on_any_local_port_only(client):
         "http://localhost:3001"
     )
     assert "access-control-allow-origin" not in preflight("https://evil.example").headers
+
+
+# --- live status (written to Redis by `python -m services.ingestion`) ---------------------
+
+
+def live_of(client, camera_id):
+    return client.get(f"/cameras/{camera_id}").json()["live"]
+
+
+def test_file_cameras_have_no_live_status(client):
+    camera = create(client, source_type="file", source_uri=None).json()
+    assert camera["live"] is None
+
+
+def test_live_status_says_when_ingestion_is_not_running(client):
+    camera = create(client).json()
+    assert camera["live"]["state"] == "not_running"
+
+
+def test_live_status_comes_from_redis_while_ingestion_runs(client, fake_redis):
+    camera = create(client).json()
+    HeartbeatLock(fake_redis, ttl=30).acquire()
+    assert live_of(client, camera["id"])["state"] == "connecting"  # not picked up yet
+
+    since = datetime(2026, 3, 7, 9, 0, tzinfo=UTC)
+    status = CameraStatus(LiveState.ONLINE, since=since, activity=True, last_snapshot_at=since)
+    write_status(fake_redis, UUID(camera["id"]), status, ttl=30)
+    live = live_of(client, camera["id"])
+    assert (live["state"], live["activity"]) == ("online", True)
+    assert live["since"] == live["last_snapshot_at"] == "2026-03-07T09:00:00Z"
+    assert client.get("/cameras").json()[0]["live"] == live
+
+
+def test_a_disabled_camera_is_shown_as_disabled(client, fake_redis):
+    camera = create(client, enabled=False).json()
+    HeartbeatLock(fake_redis, ttl=30).acquire()
+    assert camera["live"]["state"] == "disabled"
+
+
+def test_cameras_still_load_when_redis_is_down(client, fake_redis):
+    create(client)
+    fake_redis.down = True
+    response = client.get("/cameras")
+    assert response.status_code == 200
+    assert response.json()[0]["live"]["state"] == "unknown"
+
+
+def test_snapshot_redirects_to_the_latest_picture(client, storage):
+    camera = create(client).json()
+    assert client.get(f"/cameras/{camera['id']}/snapshot").status_code == 404
+    storage.upload_bytes(snapshot_key(UUID(camera["id"])), b"\xff\xd8 jpeg", "image/jpeg")
+    response = client.get(f"/cameras/{camera['id']}/snapshot", follow_redirects=False)
+    assert response.status_code == 307
+    assert f"snapshots/{camera['id']}/latest.jpg" in response.headers["location"]
+    assert response.headers["cache-control"] == "no-store"
+    assert client.get(f"/cameras/{uuid4()}/snapshot").status_code == 404

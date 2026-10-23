@@ -24,6 +24,9 @@ var/
 .env
 .venv/
 
+# Live ingestion's rolling buffer and outbox (ingestion_data_dir)
+/data/
+
 # Build artifacts
 *.egg-info/
 

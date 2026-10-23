@@ -42,7 +42,22 @@ test.beforeAll(async () => {
   ]);
 });
 
+// RTSP cameras made here are disabled at the end, so live ingestion stops trying to read them.
+const rtspCameras: string[] = [];
+
+test.afterAll(async () => {
+  const cameras: { id: string; display_name: string }[] = await (await fetch(`${API}/cameras`)).json();
+  for (const camera of cameras.filter((c) => rtspCameras.includes(c.display_name))) {
+    await fetch(`${API}/cameras/${camera.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: false }),
+    });
+  }
+});
+
 async function addCamera(page: Page, name: string, rtspUrl?: string) {
+  if (rtspUrl) rtspCameras.push(name);
   await page.goto("/cameras");
   // The camera list only loads after React has hydrated, so clicks before that would be lost.
   await expect(page.getByText("Loading cameras…")).toBeHidden();
@@ -67,7 +82,7 @@ test("the shell shows every screen in the sidebar and the API health", async ({ 
   ]);
   await expect(page.locator("aside").getByText("Operational")).toBeVisible();
 
-  for (const route of ["/live", "/events", "/investigate", "/triggers", "/settings"]) {
+  for (const route of ["/events", "/investigate", "/triggers", "/settings"]) {
     await page.goto(route);
     await expect(page.getByText("Not built yet")).toBeVisible();
   }
@@ -104,6 +119,18 @@ test("add a camera, upload a video, and play the active part that was stored", a
       timeout: 30_000,
     })
     .toBe(640);
+
+  // The timeline opens zoomed to the footage of its day: the stored part and the still parts.
+  const timeline = page.getByRole("region", { name: "Timeline" });
+  await expect(timeline.getByRole("button", { name: "Fit" })).toHaveAttribute("aria-pressed", "true");
+  await expect(timeline.getByLabel("Day")).toHaveValue("2026-03-07");
+  await expect(timeline.locator('[data-kind="segment"]')).toHaveCount(1);
+  await expect(timeline.locator('[data-kind="static"]')).toHaveCount(2);
+  await expect(timeline).toContainText("0:26 stored");
+  await timeline.locator('[data-kind="static"]').first().click();
+  await expect(timeline.getByRole("img", { name: /Reference picture/ })).toBeVisible();
+  await timeline.locator('[data-kind="segment"]').click();
+  await expect(timeline.locator("video")).toBeVisible();
 });
 
 test("a video where nothing happens stores no footage", async ({ page }) => {

@@ -2,6 +2,19 @@
 
 export type SourceType = "rtsp" | "file";
 
+/** Live camera status from `python -m services.ingestion` (RTSP cameras only). */
+export type LiveState = "connecting" | "online" | "offline" | "disabled" | "not_running" | "unknown";
+
+export interface LiveStatus {
+  state: LiveState;
+  since: string | null;
+  /** The change detector is in an active interval right now. */
+  activity: boolean;
+  last_frame_at: string | null;
+  last_snapshot_at: string | null;
+  error: string | null;
+}
+
 export interface Camera {
   id: string;
   display_name: string;
@@ -14,6 +27,8 @@ export interface Camera {
   has_source_uri: boolean;
   source_uri_masked: string | null;
   segment_count: number;
+  /** null for file cameras. */
+  live: LiveStatus | null;
 }
 
 export interface CameraInput {
@@ -40,6 +55,16 @@ export interface Segment {
   width: number | null;
   height: number | null;
   created_at: string;
+}
+
+/** A stretch where the camera saw no change (`ok`), or could not be reached (`offline`). */
+export interface StaticPeriod {
+  id: string;
+  camera_id: string;
+  start_time: string;
+  end_time: string;
+  health_status: "ok" | "offline";
+  has_reference_frame: boolean;
 }
 
 /** An uploaded file and its background ingestion (only the active parts are stored). */
