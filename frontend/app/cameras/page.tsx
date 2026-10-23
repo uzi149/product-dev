@@ -2,9 +2,11 @@
 
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Pencil, Plug, Plus } from "lucide-react";
-import { useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useState } from "react";
 import { toast } from "sonner";
 import { CameraFormDialog } from "@/components/cameras/camera-form-dialog";
+import { CameraTimeline } from "@/components/cameras/camera-timeline";
 import { SegmentsPanel } from "@/components/cameras/segments-panel";
 import { UploadCard } from "@/components/cameras/upload-card";
 import { RecentUploads } from "@/components/cameras/recent-uploads";
@@ -12,12 +14,24 @@ import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
+import { liveBadge } from "@/lib/live";
 import type { Camera } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export default function CamerasPage() {
+  // useSearchParams needs a Suspense boundary when the page is pre-rendered.
+  return (
+    <Suspense>
+      <CamerasView />
+    </Suspense>
+  );
+}
+
+function CamerasView() {
   const cameras = useQuery({ queryKey: ["cameras"], queryFn: api.cameras });
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // A Live cameras tile links here with ?camera=<id>.
+  const requested = useSearchParams().get("camera");
+  const [selectedId, setSelectedId] = useState<string | null>(requested);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Camera | null>(null);
 
@@ -85,9 +99,15 @@ export default function CamerasPage() {
                     <b className="text-[13px]">{camera.display_name}</b>
                     <div className="flex gap-1.5">
                       <Badge variant="outline">{camera.source_type}</Badge>
-                      <Badge variant={camera.enabled ? "secondary" : "outline"}>
-                        {camera.enabled ? "enabled" : "disabled"}
-                      </Badge>
+                      {camera.live && camera.enabled ? (
+                        <Badge variant={camera.live.state === "offline" ? "destructive" : "secondary"}>
+                          {liveBadge(camera.live).label.toLowerCase()}
+                        </Badge>
+                      ) : (
+                        <Badge variant={camera.enabled ? "secondary" : "outline"}>
+                          {camera.enabled ? "enabled" : "disabled"}
+                        </Badge>
+                      )}
                     </div>
                   </div>
                   <p className="mt-2 font-mono text-[11px] text-muted-foreground">
@@ -122,8 +142,13 @@ export default function CamerasPage() {
 
           {selected && (
             <div className="grid min-w-0 content-start gap-4">
-              <UploadCard key={`upload-${selected.id}`} camera={selected} />
-              <RecentUploads key={`uploads-${selected.id}`} camera={selected} />
+              <CameraTimeline key={`timeline-${selected.id}`} camera={selected} />
+              {selected.source_type === "file" && (
+                <>
+                  <UploadCard key={`upload-${selected.id}`} camera={selected} />
+                  <RecentUploads key={`uploads-${selected.id}`} camera={selected} />
+                </>
+              )}
               <SegmentsPanel key={`segments-${selected.id}`} camera={selected} />
             </div>
           )}

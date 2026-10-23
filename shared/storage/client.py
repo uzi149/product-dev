@@ -9,8 +9,12 @@ from pathlib import Path
 from minio import Minio
 from minio.deleteobjects import DeleteObject
 from minio.error import MinioException, S3Error
+from urllib3.exceptions import HTTPError
 
 from shared.config import Settings, get_settings
+
+# MinIO answers with MinioException; when it can't be reached at all, urllib3 raises HTTPError.
+_ERRORS = (MinioException, HTTPError)
 
 # Presigned URLs are signed locally. A fixed region avoids a lookup request to the server,
 # which matters when the public endpoint isn't reachable from this process.
@@ -62,7 +66,7 @@ class StorageClient:
         try:
             if not self._client.bucket_exists(self.bucket):
                 self._client.make_bucket(self.bucket)
-        except MinioException as error:
+        except _ERRORS as error:
             raise _wrap(error) from error
 
     def is_healthy(self) -> bool:
@@ -78,7 +82,7 @@ class StorageClient:
             self._client.fput_object(
                 self.bucket, key, str(path), content_type=content_type or "application/octet-stream"
             )
-        except MinioException as error:
+        except _ERRORS as error:
             raise _wrap(error) from error
         return self.to_uri(key)
 
@@ -87,14 +91,14 @@ class StorageClient:
             self._client.put_object(
                 self.bucket, key, BytesIO(data), length=len(data), content_type=content_type
             )
-        except MinioException as error:
+        except _ERRORS as error:
             raise _wrap(error) from error
         return self.to_uri(key)
 
     def download_file(self, key: str, path: str | Path) -> None:
         try:
             self._client.fget_object(self.bucket, key, str(path))
-        except MinioException as error:
+        except _ERRORS as error:
             raise _wrap(error) from error
 
     def exists(self, key: str) -> bool:
@@ -104,19 +108,21 @@ class StorageClient:
             if error.code in {"NoSuchKey", "NoSuchBucket", "NotFound"}:
                 return False
             raise _wrap(error) from error
+        except _ERRORS as error:
+            raise _wrap(error) from error
         return True
 
     def presigned_get_url(self, key: str, expires: timedelta = timedelta(hours=1)) -> str:
         try:
             return self._signer.presigned_get_object(self.bucket, key, expires=expires)
-        except MinioException as error:
+        except _ERRORS as error:
             raise _wrap(error) from error
 
     def delete(self, key: str) -> None:
         """Deleting a missing object is not an error."""
         try:
             self._client.remove_object(self.bucket, key)
-        except MinioException as error:
+        except _ERRORS as error:
             raise _wrap(error) from error
 
     def delete_prefix(self, prefix: str) -> int:
@@ -127,7 +133,7 @@ class StorageClient:
                 for obj in self._client.list_objects(self.bucket, prefix=prefix, recursive=True)
             ]
             errors = list(self._client.remove_objects(self.bucket, keys))
-        except MinioException as error:
+        except _ERRORS as error:
             raise _wrap(error) from error
         if errors:
             raise StorageError(f"could not delete {len(errors)} objects: {errors[0]}")

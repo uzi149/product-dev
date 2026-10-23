@@ -15,6 +15,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { api } from "@/lib/api";
+import { onlineCount } from "@/lib/live";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -61,6 +62,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         : "Operational";
   const healthy = !unreachable && !degraded && !health.isPending;
   const current = ALL_ITEMS.find((i) => isActive(pathname, i.href));
+  const live = cameras.data ? onlineCount(cameras.data) : null;
 
   return (
     <div className="grid min-h-screen lg:grid-cols-[228px_minmax(0,1fr)]">
@@ -100,6 +102,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 >
                   <Icon className="size-4" />
                   {label}
+                  {href === "/live" && live && live.total > 0 && (
+                    <span
+                      title="Live cameras online"
+                      className={cn(
+                        "ml-auto rounded-full px-1.5 py-0.5 font-mono text-[10px]",
+                        live.online < live.total ? "bg-red/15 text-[#ff8984]" : "bg-green/10 text-green",
+                      )}
+                    >
+                      {live.online}/{live.total}
+                    </span>
+                  )}
                 </Link>
               ))}
             </nav>

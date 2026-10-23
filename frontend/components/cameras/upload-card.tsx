@@ -52,6 +52,7 @@ export function UploadCard({ camera }: { camera: Camera }) {
     if (!finished || announced.current === finished.id) return;
     announced.current = finished.id;
     queryClient.invalidateQueries({ queryKey: ["segments", camera.id] });
+    queryClient.invalidateQueries({ queryKey: ["static-periods", camera.id] });
     queryClient.invalidateQueries({ queryKey: ["uploads", camera.id] });
     queryClient.invalidateQueries({ queryKey: ["cameras"] });
     const message = `${finished.filename}: ${uploadSummary(finished)}`;

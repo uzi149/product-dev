@@ -10,11 +10,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from services.api.deps import get_session, get_storage_client, get_upload_queue
+from services.api.deps import get_redis, get_session, get_storage_client, get_upload_queue
 from services.api.main import create_app
 from shared.config import get_settings
 from shared.database.models import Camera, Upload
 from shared.storage.keys import upload_key
+from tests.fakes import FakeRedis
 
 FFMPEG = shutil.which("ffmpeg")
 
@@ -34,7 +35,13 @@ def queued():
 
 
 @pytest.fixture
-def client(engine, storage, queued):
+def fake_redis():
+    """Redis as live ingestion leaves it; empty = ingestion is not running."""
+    return FakeRedis()
+
+
+@pytest.fixture
+def client(engine, storage, queued, fake_redis):
     app = create_app()
 
     def db_session():
@@ -44,6 +51,7 @@ def client(engine, storage, queued):
     app.dependency_overrides[get_session] = db_session
     app.dependency_overrides[get_storage_client] = lambda: storage
     app.dependency_overrides[get_upload_queue] = lambda: queued.append
+    app.dependency_overrides[get_redis] = lambda: fake_redis
     with TestClient(app) as test_client:
         yield test_client
     # Remove every object the test created: segments and static frames are stored under the
@@ -52,6 +60,7 @@ def client(engine, storage, queued):
         for camera_id in session.scalars(select(Camera.id)):
             storage.delete_prefix(f"segments/{camera_id}/")
             storage.delete_prefix(f"static/{camera_id}/")
+            storage.delete_prefix(f"snapshots/{camera_id}/")
         for upload_id in session.scalars(select(Upload.id)):
             storage.delete(upload_key(upload_id))
 

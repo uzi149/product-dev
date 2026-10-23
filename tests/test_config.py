@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -28,11 +30,24 @@ def test_scope_defaults(settings):
 def test_change_detection_defaults(settings):
     s = settings()
     assert s.detect_pixel_delta == 25
-    assert s.detect_changed_fraction == 0.005
+    assert s.detect_changed_fraction == 0.001  # 0.1 % (ADR 0010 amendment)
     assert s.detect_ssim_threshold == 0.7
     assert s.detect_activation_samples == 2
     assert s.detect_background_alpha == 0.05
     assert s.detect_width == 320
+
+
+def test_live_ingestion_defaults(settings):
+    s = settings()
+    assert s.max_segment_seconds == 30  # ADR 0015
+    assert s.camera_reload_seconds == 30
+    assert s.snapshot_interval_seconds == 5
+    assert s.snapshot_width == 960
+    assert s.camera_status_ttl_seconds == 30
+    assert s.stream_stall_seconds == 15
+    assert s.reconnect_max_backoff_seconds == 30
+    assert s.buffer_dir == Path("data") / "buffer"
+    assert s.outbox_dir == Path("data") / "outbox"
 
 
 def test_environment_overrides_defaults(settings, monkeypatch):
@@ -61,6 +76,7 @@ def test_env_file_is_read(tmp_path, monkeypatch):
         {"analysis_fps": 0},
         {"detect_changed_fraction": 0},
         {"detect_ssim_threshold": 1.5},
+        {"max_segment_seconds": 9},  # less than two 5 s fragments
     ],
 )
 def test_invalid_values_are_rejected(settings, overrides):
