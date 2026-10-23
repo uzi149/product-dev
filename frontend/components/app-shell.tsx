@@ -75,7 +75,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             ◉
           </div>
           <div>
-            <b className="tracking-tight">Sentinel</b>
+            <b className="font-heading tracking-tight">Sentinel</b>
             <small className="block font-mono text-[9px] uppercase leading-snug tracking-[0.16em] text-muted-foreground">
               Visual intelligence
             </small>
@@ -129,9 +129,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           >
             <Menu className="size-5" />
           </button>
-          <div className="font-semibold tracking-tight">
+          <div className="font-heading font-semibold tracking-tight">
             {current?.title ?? "Sentinel"}
-            <span className="mt-0.5 block text-[11px] font-normal text-muted-foreground">
+            <span className="mt-0.5 block font-sans text-[11px] font-normal text-muted-foreground">
               Local camera intelligence
             </span>
           </div>
