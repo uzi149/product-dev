@@ -9,9 +9,10 @@ from shared.schemas.camera import mask_uri
 
 
 def test_round_trip_and_ciphertext_differs():
-    token = encrypt_text("rtsp://admin:pw@10.0.0.1/s")
-    assert "pw" not in token
-    assert decrypt_text(token) == "rtsp://admin:pw@10.0.0.1/s"
+    # "!" is outside the URL-safe base64 alphabet, so the password can't appear by chance.
+    token = encrypt_text("rtsp://admin:s3cret!@10.0.0.1/s")
+    assert "s3cret!" not in token
+    assert decrypt_text(token) == "rtsp://admin:s3cret!@10.0.0.1/s"
 
 
 def test_decrypting_with_another_key_fails(monkeypatch):
