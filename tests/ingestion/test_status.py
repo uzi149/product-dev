@@ -105,3 +105,25 @@ def test_redis_or_minio_being_down_does_not_stop_publishing(caplog):
     pub.publish_once()
     assert stored(client, camera).state == LiveState.ONLINE
     assert storage.objects
+
+
+def test_the_heartbeat_and_statuses_dont_wait_for_minio():
+    # While MinIO can't be reached, every upload spends seconds in retries; with many cameras
+    # the heartbeat expired and the Live page said ingestion wasn't running.
+    board, client, a, b = StatusBoard(), FakeRedis(), uuid4(), uuid4()
+    heartbeat_at_upload = []
+
+    class UnreachableStorage(FakeStorage):
+        def upload_bytes(self, key, data, content_type):
+            heartbeat_at_upload.append(client.ttl.get(HEARTBEAT_KEY))
+            raise StorageError("MinIO is down (test)")
+
+    pub = publisher(board, client, UnreachableStorage())
+    client.ttl[HEARTBEAT_KEY] = None  # not refreshed yet
+    for camera in (a, b):
+        board.set_state(camera, LiveState.ONLINE, AT)
+        board.snapshot(camera, b"jpeg", AT)
+    pub.publish_once()
+    assert heartbeat_at_upload == [30], "one upload tried, after the heartbeat was refreshed"
+    assert stored(client, a).state == stored(client, b).state == LiveState.ONLINE
+    assert stored(client, a).last_snapshot_at is None

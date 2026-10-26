@@ -119,14 +119,20 @@ class StatusPublisher:
         self._failing: set[str] = set()
 
     def publish_once(self) -> None:
+        full = time.monotonic() - self._last_full >= self.refresh_seconds
+        # The heartbeat first: while MinIO is unreachable a snapshot upload takes seconds of
+        # retries, and the heartbeat must not expire meanwhile (the API would say ingestion
+        # isn't running).
+        if full:
+            self._ok("redis", self._keep_heartbeat)
         for camera_id, (jpeg, at) in self.board.take_snapshots().items():
             key = snapshot_key(camera_id)
-            if self._ok(
+            if not self._ok(
                 "storage", lambda k=key, j=jpeg: self.storage.upload_bytes(k, j, "image/jpeg")
             ):
-                self.board.snapshot_stored(camera_id, at)
+                break  # MinIO is down: one failed upload per round, newer snapshots come anyway
+            self.board.snapshot_stored(camera_id, at)
         statuses, dirty, removed = self.board.take()
-        full = time.monotonic() - self._last_full >= self.refresh_seconds
         targets = statuses if full else {i: s for i, s in statuses.items() if i in dirty}
 
         def write() -> None:
@@ -134,12 +140,14 @@ class StatusPublisher:
                 write_status(self.client, camera_id, status, self.ttl)
             for camera_id in removed:
                 delete_status(self.client, camera_id)
-            # After a long Redis outage the heartbeat may have expired: take it back if free.
-            if full and not self.lock.refresh() and not self.lock.acquire():
-                log.error("the ingestion heartbeat belongs to %s now", self.lock.holder())
 
         if self._ok("redis", write) and full:
             self._last_full = time.monotonic()
+
+    def _keep_heartbeat(self) -> None:
+        # After a long Redis outage the heartbeat may have expired: take it back if free.
+        if not self.lock.refresh() and not self.lock.acquire():
+            log.error("the ingestion heartbeat belongs to %s now", self.lock.holder())
 
     def run_forever(self, stop: threading.Event, interval: float = 1) -> None:
         while not stop.is_set():
