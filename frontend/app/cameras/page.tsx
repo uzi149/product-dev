@@ -15,7 +15,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { liveBadge } from "@/lib/live";
+import { LIST_POLL_MS } from "@/lib/refresh";
 import type { Camera } from "@/lib/types";
+import { useHydrated } from "@/lib/use-hydrated";
 import { cn } from "@/lib/utils";
 
 export default function CamerasPage() {
@@ -28,10 +30,21 @@ export default function CamerasPage() {
 }
 
 function CamerasView() {
-  const cameras = useQuery({ queryKey: ["cameras"], queryFn: api.cameras });
-  // A Live cameras tile links here with ?camera=<id>.
+  const cameras = useQuery({ queryKey: ["cameras"], queryFn: api.cameras, refetchInterval: LIST_POLL_MS });
+  // Until hydrated, render what the server did (the loading state), even when the sidebar has
+  // already put the cameras in the query cache (ADR 0017).
+  const hydrated = useHydrated();
+  const list = hydrated ? cameras.data : undefined;
+  // A Live cameras tile links here with ?camera=<id>. A camera picked here is also written to the
+  // URL, so a reload shows the same one. The state answers at once: Next.js applies the URL in a
+  // transition, and a late switch would remount the upload card under a file being chosen.
   const requested = useSearchParams().get("camera");
-  const [selectedId, setSelectedId] = useState<string | null>(requested);
+  const [picked, setPicked] = useState<string | null>(null);
+  const selectedId = picked ?? requested;
+  function select(id: string) {
+    setPicked(id);
+    window.history.replaceState(null, "", `?${new URLSearchParams({ camera: id })}`);
+  }
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Camera | null>(null);
 
@@ -47,7 +60,7 @@ function CamerasView() {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const selected = cameras.data?.find((c) => c.id === selectedId) ?? cameras.data?.[0] ?? null;
+  const selected = list?.find((c) => c.id === selectedId) ?? list?.[0] ?? null;
 
   return (
     <>
@@ -62,13 +75,13 @@ function CamerasView() {
         }
       />
 
-      {cameras.isPending && <p className="text-sm text-muted-foreground">Loading cameras…</p>}
-      {cameras.isError && (
+      {(!hydrated || cameras.isPending) && <p className="text-sm text-muted-foreground">Loading cameras…</p>}
+      {hydrated && cameras.isError && (
         <p role="alert" className="text-sm text-destructive">
           Could not load cameras: {cameras.error.message}
         </p>
       )}
-      {cameras.data?.length === 0 && (
+      {list?.length === 0 && (
         <div className="grid min-h-[200px] place-items-center rounded-2xl border border-dashed text-center">
           <div>
             <p className="text-sm text-muted-foreground">No cameras yet.</p>
@@ -79,10 +92,10 @@ function CamerasView() {
         </div>
       )}
 
-      {cameras.data && cameras.data.length > 0 && (
+      {list && list.length > 0 && (
         <div className="grid gap-4 xl:grid-cols-[minmax(300px,0.8fr)_minmax(0,1.6fr)]">
           <ul className="grid content-start gap-3">
-            {cameras.data.map((camera) => (
+            {list.map((camera) => (
               <li
                 key={camera.id}
                 className={cn(
@@ -93,7 +106,7 @@ function CamerasView() {
                 <button
                   type="button"
                   className="block w-full text-left"
-                  onClick={() => setSelectedId(camera.id)}
+                  onClick={() => select(camera.id)}
                 >
                   <div className="flex items-center justify-between gap-2">
                     <b className="text-[13px]">{camera.display_name}</b>
@@ -159,7 +172,7 @@ function CamerasView() {
         <CameraFormDialog
           open
           onOpenChange={setAdding}
-          onSaved={(camera) => setSelectedId(camera.id)}
+          onSaved={(camera) => select(camera.id)}
         />
       )}
       {editing && (

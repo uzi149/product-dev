@@ -57,6 +57,17 @@ test.afterAll(async () => {
   }
 });
 
+/** A file camera made through the API, without the UI. */
+async function createFileCamera(name: string): Promise<{ id: string }> {
+  const response = await fetch(`${API}/cameras`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ display_name: name, source_type: "file", enabled: true, retention_days: 14 }),
+  });
+  expect(response.status).toBe(201);
+  return response.json();
+}
+
 async function addCamera(page: Page, name: string, rtspUrl?: string) {
   if (rtspUrl) rtspCameras.push(name);
   await page.goto("/cameras");
@@ -155,7 +166,7 @@ test("a video where nothing happens stores no footage", async ({ page }) => {
   await expect(page.getByRole("listitem").filter({ hasText: name })).toContainText("0 segments");
 });
 
-test("an invalid upload shows the API's error and stores nothing", async ({ page }) => {
+test("an invalid upload shows the API's error, lists it as failed and stores nothing", async ({ page }) => {
   const name = unique();
   await addCamera(page, name);
 
@@ -166,7 +177,15 @@ test("an invalid upload shows the API's error and stores nothing", async ({ page
     buffer: Buffer.from("this is not a video"),
   });
   await upload.getByRole("button", { name: "Upload", exact: true }).click();
-  await expect(page.getByText(/not a readable video/)).toBeVisible({ timeout: 30_000 });
+  await expect(
+    page.locator("[data-sonner-toast]").filter({ hasText: /not a readable video/ }),
+  ).toBeVisible({ timeout: 30_000 });
+  // The API stored nothing, but the page lists the rejected file (ADR 0016).
+  const row = page.locator("section", { hasText: "Recent uploads" }).getByRole("listitem");
+  await expect(row).toHaveCount(1);
+  await expect(row).toContainText("notes.mp4");
+  await expect(row).toContainText("failed");
+  await expect(row).toContainText(/Failed: not a readable video/);
   await expect(page.getByText("No footage stored for this camera yet.")).toBeVisible();
 });
 
@@ -198,8 +217,32 @@ test("editing keeps the stream URL write-only", async ({ page }) => {
   );
 });
 
-test("the UI says so when the API is not reachable", async ({ page }) => {
+test("the UI says so when the API is not reachable, and recovers without a reload", async ({ page }) => {
+  const name = unique();
+  await createFileCamera(name);
   await page.route(`${API}/**`, (route) => route.abort());
   await page.goto("/cameras");
-  await expect(page.getByRole("alert").filter({ hasText: "The API is not reachable." })).toBeVisible();
+  const banner = page.getByRole("alert").filter({ hasText: "The API is not reachable." });
+  await expect(banner).toBeVisible();
+  await expect(page.getByText(/Could not load cameras/)).toBeVisible();
+
+  // The API answers again: the next health check reloads what failed (ADR 0017).
+  await page.unroute(`${API}/**`);
+  await expect(banner).toBeHidden({ timeout: 30_000 });
+  await expect(page.getByText(/Could not load cameras/)).toBeHidden();
+  await expect(page.getByRole("listitem").filter({ hasText: name })).toBeVisible();
+});
+
+test("a picked camera stays selected after a reload", async ({ page }) => {
+  const first = unique();
+  const camera = await createFileCamera(first);
+  await addCamera(page, unique());
+
+  await page.getByRole("listitem").filter({ hasText: first }).getByRole("button").first().click();
+  await expect(page).toHaveURL(new RegExp(`/cameras\\?camera=${camera.id}$`));
+  const upload = page.locator("section", { hasText: "Upload a video" });
+  await expect(upload).toContainText(`stored for ${first}`);
+
+  await page.reload();
+  await expect(upload).toContainText(`stored for ${first}`);
 });

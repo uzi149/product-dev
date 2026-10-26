@@ -97,6 +97,7 @@ def test_worker_stores_only_the_active_part_and_it_plays_back(
 
     playback = client.get(f"/segments/{segment['id']}/playback", follow_redirects=False)
     assert playback.status_code == 307
+    assert playback.headers["cache-control"] == "no-store"
     served = httpx.get(playback.headers["location"])
     assert served.status_code == 200
     downloaded = tmp_path / "played.mp4"

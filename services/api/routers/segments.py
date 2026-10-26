@@ -58,4 +58,5 @@ def playback(
     """Redirect to a time-limited MinIO URL; the browser then streams it with range requests."""
     segment = _get_segment(session, segment_id)
     url = storage.presigned_get_url(storage.key_from_uri(segment.storage_uri))
-    return RedirectResponse(url, status_code=307)
+    # The presigned URL expires: never let the browser reuse this redirect.
+    return RedirectResponse(url, status_code=307, headers={"Cache-Control": "no-store"})

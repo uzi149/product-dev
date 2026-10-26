@@ -1,14 +1,17 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useState } from "react";
+import { ReferenceFrame, SegmentVideo } from "@/components/cameras/stored-media";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
 import { formatDateTime, formatDuration } from "@/lib/format";
+import { LIST_POLL_MS } from "@/lib/refresh";
 import {
   fitRange,
+  isValidDay,
   layoutBlocks,
   localDay,
   type Preset,
@@ -56,6 +59,7 @@ export function CameraTimeline({ camera }: { camera: Camera }) {
   const [back, setBack] = useState(0);
   const [chosenDay, setChosenDay] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const [today, setToday] = useState(() => localDay(new Date()));
   const [selected, setSelected] = useState<TimelineBlock | null>(null);
 
   // File cameras open on the day of their newest stored segment (uploads have their own dates).
@@ -63,9 +67,9 @@ export function CameraTimeline({ camera }: { camera: Camera }) {
     queryKey: ["segments", camera.id, "newest"],
     queryFn: () => api.segments({ cameraId: camera.id, limit: 1 }),
     enabled: !isLive,
+    refetchInterval: LIST_POLL_MS,
   });
   const newestStart = newest.data?.[0]?.start_time;
-  const today = localDay(new Date(now));
   const day = chosenDay ?? (newestStart ? localDay(new Date(newestStart)) : today);
 
   // While showing the latest range, move it along so new footage appears.
@@ -76,17 +80,29 @@ export function CameraTimeline({ camera }: { camera: Camera }) {
     const id = setInterval(() => setNow(Date.now()), 15_000);
     return () => clearInterval(id);
   }, [following]);
+  // `now` stands still while an earlier range or a day is shown: today moves on by itself, so the
+  // page passes midnight without a reload.
+  useEffect(() => {
+    const id = setInterval(() => setToday(localDay(new Date())), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   const loaded = rangeFor(preset, new Date(now), back, day);
   const start = new Date(loaded.start).toISOString();
   const end = new Date(loaded.end).toISOString();
+  // Each new range is a new query: keep the previous blocks on screen until it has loaded, so the
+  // timeline doesn't go blank every time it moves along with the clock.
   const segments = useQuery({
     queryKey: ["segments", camera.id, "timeline", start, end],
     queryFn: () => api.segments({ cameraId: camera.id, start, end, limit: 500 }),
+    refetchInterval: LIST_POLL_MS,
+    placeholderData: keepPreviousData,
   });
   const periods = useQuery({
     queryKey: ["static-periods", camera.id, start, end],
     queryFn: () => api.staticPeriods({ cameraId: camera.id, start, end }),
+    refetchInterval: LIST_POLL_MS,
+    placeholderData: keepPreviousData,
   });
 
   const fitted = preset === "fit" ? fitRange(segments.data ?? [], periods.data ?? []) : null;
@@ -141,7 +157,7 @@ export function CameraTimeline({ camera }: { camera: Camera }) {
               type="date"
               aria-label="Day"
               value={day}
-              onChange={(e) => e.target.value && setChosenDay(e.target.value)}
+              onChange={(e) => isValidDay(e.target.value) && setChosenDay(e.target.value)}
               className="h-8 w-[150px]"
             />
           )}
@@ -235,13 +251,7 @@ function Selection({
   if (block.kind === "segment") {
     return (
       <div className="border-t bg-black p-3">
-        <video
-          key={block.id}
-          src={api.playbackUrl(block.id)}
-          controls
-          autoPlay
-          className="mx-auto max-h-[420px] w-full rounded-lg"
-        />
+        <SegmentVideo key={block.id} segmentId={block.id} />
         {caption}
       </div>
     );
@@ -250,13 +260,7 @@ function Selection({
   return (
     <div className="border-t bg-black/40 p-3">
       {hasFrame ? (
-        // A redirect to a presigned MinIO URL, not a static asset: a plain <img>.
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={api.referenceFrameUrl(block.id)}
-          alt="Reference picture of the unchanged scene"
-          className="mx-auto max-h-[360px] rounded-lg"
-        />
+        <ReferenceFrame key={block.id} periodId={block.id} />
       ) : (
         <p className="py-6 text-center text-xs text-muted-foreground">
           {block.kind === "offline"

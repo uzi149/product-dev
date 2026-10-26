@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   fitRange,
+  isValidDay,
   layoutBlocks,
   localDay,
   MIN_WIDTH_PERCENT,
@@ -152,5 +153,19 @@ describe("short ranges", () => {
     const marks = ticks({ start: T0, end: T0 + 60_000 });
     expect(marks[1].at - marks[0].at).toBe(10_000);
     expect(marks[0].label).toMatch(/\d{2}\D\d{2}\D\d{2}/);
+  });
+});
+
+describe("isValidDay", () => {
+  it("accepts a calendar day", () => {
+    expect(isValidDay("2026-03-07")).toBe(true);
+    expect(isValidDay("2028-02-29")).toBe(true);
+  });
+
+  it("rejects what a date input can hold but the timeline can't show", () => {
+    expect(isValidDay("")).toBe(false);
+    expect(isValidDay("275760-09-13")).toBe(false);
+    expect(isValidDay("0050-01-01")).toBe(false);
+    expect(isValidDay("2026-02-30")).toBe(false);
   });
 });

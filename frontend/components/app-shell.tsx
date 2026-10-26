@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
   Camera,
@@ -13,9 +13,10 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { onlineCount } from "@/lib/live";
+import { LIST_POLL_MS, refetchFailed } from "@/lib/refresh";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -49,7 +50,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false);
 
   const health = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 15_000 });
-  const cameras = useQuery({ queryKey: ["cameras"], queryFn: api.cameras });
+  const cameras = useQuery({ queryKey: ["cameras"], queryFn: api.cameras, refetchInterval: LIST_POLL_MS });
+
+  // The API answers again: reload what failed while it was down instead of waiting for each
+  // list's next poll (some, like a watched upload, stop polling after an error).
+  const queryClient = useQueryClient();
+  const wasUnreachable = useRef(false);
+  useEffect(() => {
+    if (health.isError) wasUnreachable.current = true;
+    else if (health.isSuccess && wasUnreachable.current) {
+      wasUnreachable.current = false;
+      refetchFailed(queryClient);
+    }
+  }, [health.isError, health.isSuccess, queryClient]);
 
   const unreachable = health.isError;
   const degraded = health.data?.status === "degraded";

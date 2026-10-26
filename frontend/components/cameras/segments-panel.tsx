@@ -1,14 +1,16 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Play, X } from "lucide-react";
 import { useState } from "react";
+import { SegmentVideo } from "@/components/cameras/stored-media";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { formatDateTime, formatDuration, localInputToIso } from "@/lib/format";
+import { LIST_POLL_MS } from "@/lib/refresh";
 import type { Camera } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -23,6 +25,9 @@ export function SegmentsPanel({ camera }: { camera: Camera }) {
   const segments = useQuery({
     queryKey: ["segments", camera.id, start, end],
     queryFn: () => api.segments({ cameraId: camera.id, start, end }),
+    refetchInterval: LIST_POLL_MS,
+    // A new From/To keeps the current list on screen until the new one arrives.
+    placeholderData: keepPreviousData,
   });
 
   return (
@@ -98,12 +103,7 @@ export function SegmentsPanel({ camera }: { camera: Camera }) {
               </div>
               {isPlaying && (
                 <div className="bg-black p-3">
-                  <video
-                    src={api.playbackUrl(segment.id)}
-                    controls
-                    autoPlay
-                    className="mx-auto max-h-[420px] w-full rounded-lg"
-                  />
+                  <SegmentVideo segmentId={segment.id} />
                 </div>
               )}
             </li>

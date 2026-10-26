@@ -47,6 +47,17 @@ export function localDay(date: Date): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
+/**
+ * A YYYY-MM-DD the timeline can show. A date input also accepts years such as 275760, past the
+ * last date JavaScript can represent, and two-digit years that `new Date(y, …)` reads as 19yy.
+ */
+export function isValidDay(day: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
+  if (!match) return false;
+  const [y, m, d] = match.slice(1).map(Number);
+  return y >= 1970 && localDay(new Date(y, m - 1, d)) === day;
+}
+
 export function shiftDay(day: string, days: number): string {
   const [y, m, d] = day.split("-").map(Number);
   return localDay(new Date(y, m - 1, d + days));
