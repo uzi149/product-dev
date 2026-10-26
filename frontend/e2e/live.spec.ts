@@ -1,12 +1,12 @@
 import { expect, test } from "@playwright/test";
 
-// Needs the whole live stack: `docker compose --profile sim up -d` (the simulated cameras), the
-// API, and live ingestion: `python -m services.ingestion`. Cameras made here are disabled at the
-// end, so ingestion stops reading them.
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
-const RTSP = process.env.E2E_RTSP_URL ?? "rtsp://127.0.0.1:8554";
+import { E2E_API_URL as API, E2E_RTSP_URL as RTSP } from "./stack";
+
+// Needs the simulated cameras (`docker compose --profile sim up -d`); Playwright starts the e2e
+// API and live ingestion. Cameras made here are disabled at the end, so ingestion stops reading
+// them.
 const unique = () => `e2e-live-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-// Ingestion reads the camera list every 30 s; then the stream has to connect.
+// The e2e ingestion reads the camera list every 5 s; then the stream has to connect.
 const PICKED_UP_MS = 60_000;
 
 const created: string[] = [];
@@ -27,8 +27,8 @@ test.beforeAll(async () => {
   const probe = await addLiveCamera(unique(), "e2e-probe");
   if (probe.live.state === "not_running") {
     throw new Error(
-      "Live ingestion is not running. Start it with `python -m services.ingestion`, and the " +
-        "simulated cameras with `docker compose --profile sim up -d`.",
+      "The e2e live ingestion is not running; see data/e2e/logs/ingestion.log. The simulated " +
+        "cameras need `docker compose --profile sim up -d`.",
     );
   }
 });

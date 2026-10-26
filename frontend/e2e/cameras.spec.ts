@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+import { E2E_API_URL as API } from "./stack";
+
 const unique = () => `e2e-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 
 let videoPath = "";
@@ -16,9 +17,8 @@ test.beforeAll(async () => {
     expect((await health.json()).status).toBe("ok");
   } catch {
     throw new Error(
-      `The API is not running at ${API}. Start the stack first: docker compose up -d, ` +
-        "alembic upgrade head, uvicorn services.api.main:app, and a worker: " +
-        "celery -A shared.jobs.celery_app worker --pool=solo -Q default",
+      `The e2e API is not answering at ${API}. Playwright starts it (python -m tests.e2e_stack); ` +
+        "see data/e2e/logs/ and check that `docker compose --profile sim up -d` is running.",
     );
   }
   // A test video made with ffmpeg, so no video file is committed: a still grey scene for
@@ -42,7 +42,8 @@ test.beforeAll(async () => {
   ]);
 });
 
-// RTSP cameras made here are disabled at the end, so live ingestion stops trying to read them.
+// RTSP cameras made here are disabled at the end, so the e2e ingestion stops trying to read them
+// while the other tests run.
 const rtspCameras: string[] = [];
 
 test.afterAll(async () => {

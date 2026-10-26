@@ -260,12 +260,19 @@ The other screens are placeholders that say which phase builds them.
 
 Checks: `npm run lint`, `npm test` (unit tests), `npm run build`. CI runs these.
 
-End-to-end tests (Playwright, real Chrome) drive the whole stack: start the Docker stack with
-the sim cameras (`docker compose --profile sim up -d`), run the migrations and start the API, a
-worker and live ingestion first, then `npm run e2e` (it starts its own dev server on port 3100
-and needs FFmpeg on `PATH`). They are not part of CI. They create cameras named `e2e-...` in the
-development database. There is no delete endpoint yet, so remove them by hand if they bother
-you. The RTSP cameras they make are disabled at the end, so live ingestion stops reading them.
+End-to-end tests (Playwright, real Chrome) drive the whole stack on **data of their own**, so
+the development data stays clean. Start Docker with the sim cameras
+(`docker compose --profile sim up -d`), then run `npm run e2e`. It needs FFmpeg on `PATH` and
+the venv in `.venv`, and is not part of CI. Playwright starts:
+
+- `python -m tests.e2e_stack`: an e2e backend with its own PostgreSQL database
+  (`sentinel_e2e`, migrated), MinIO bucket (`sentinel-e2e`), Redis database (1) and ingestion
+  folder (`data/e2e/`), all emptied at every run. It runs the API on `127.0.0.1:8100`, a worker
+  and live ingestion; their logs are in `data/e2e/logs/`.
+- a dev server on port 3100 that talks to that API.
+
+Your own API, worker, live ingestion and `npm run dev` can keep running alongside; only ports
+8100 and 3100 must be free. The sim cameras are shared, read-only.
 
 ## Git workflow
 

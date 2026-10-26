@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     # Redis
     redis_host: str = "127.0.0.1"
     redis_port: int = 6380
+    # Database number: the job queue, camera status and the ingestion heartbeat all live in it.
+    redis_db: int = Field(default=0, ge=0, le=15)
 
     # MediaMTX (RTSP server)
     mediamtx_host: str = "127.0.0.1"
@@ -116,7 +118,7 @@ class Settings(BaseSettings):
 
     @property
     def redis_url(self) -> str:
-        return f"redis://{self.redis_host}:{self.redis_port}/0"
+        return f"redis://{self.redis_host}:{self.redis_port}/{self.redis_db}"
 
     @property
     def mediamtx_rtsp_url(self) -> str:

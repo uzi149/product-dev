@@ -89,6 +89,7 @@ def test_connection_urls(settings):
     assert s.database_url == "postgresql+psycopg://sentinel:p%40ss%2Fword@127.0.0.1:5433/sentinel"
     assert s.minio_endpoint == "127.0.0.1:9000"
     assert s.redis_url == "redis://127.0.0.1:6380/0"
+    assert settings(redis_db=1).redis_url == "redis://127.0.0.1:6380/1"
     assert s.mediamtx_rtsp_url == "rtsp://127.0.0.1:8554"
 
 
