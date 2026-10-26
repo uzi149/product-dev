@@ -5,6 +5,7 @@ hard-coded behaviour. Defaults are the "Initial configuration" values.
 """
 
 from functools import lru_cache
+from pathlib import Path
 from urllib.parse import quote
 
 from pydantic import Field, model_validator
@@ -33,6 +34,8 @@ class Settings(BaseSettings):
     # Redis
     redis_host: str = "127.0.0.1"
     redis_port: int = 6380
+    # Database number: the job queue, camera status and the ingestion heartbeat all live in it.
+    redis_db: int = Field(default=0, ge=0, le=15)
 
     # MediaMTX (RTSP server)
     mediamtx_host: str = "127.0.0.1"
@@ -58,12 +61,27 @@ class Settings(BaseSettings):
 
     # Change detection defaults (ADR 0010); cameras override them in `detection_config`.
     detect_pixel_delta: int = Field(default=25, ge=1, le=255)
-    detect_changed_fraction: float = Field(default=0.005, gt=0, le=1)
+    # 0.1 %: a single person in a wide view covers only 0.05-0.3 % of the picture (ADR 0010).
+    detect_changed_fraction: float = Field(default=0.001, gt=0, le=1)
     detect_ssim_threshold: float = Field(default=0.7, gt=0, le=1)
     detect_activation_samples: int = Field(default=2, ge=1)
     detect_background_alpha: float = Field(default=0.05, gt=0, le=1)
     # Frames are downscaled to this width before they're compared.
     detect_width: int = Field(default=320, ge=32)
+
+    # Live ingestion (ADR 0014)
+    # Holds buffer/ (the rolling fragments) and outbox/ (footage waiting for MinIO + PostgreSQL).
+    ingestion_data_dir: Path = Path("data")
+    camera_reload_seconds: int = Field(default=30, gt=0)
+    snapshot_interval_seconds: int = Field(default=5, gt=0)
+    # Frames for change detection and snapshots are scaled down to at most this width.
+    snapshot_width: int = Field(default=960, ge=64)
+    # Long activity is stored as back-to-back segments of at most this length (ADR 0015).
+    max_segment_seconds: int = Field(default=30, gt=0)
+    camera_status_ttl_seconds: int = Field(default=30, gt=0)
+    # No frame for this long and the stream is restarted.
+    stream_stall_seconds: int = Field(default=15, gt=0)
+    reconnect_max_backoff_seconds: int = Field(default=30, gt=0)
 
     # MVP plan §2
     keyframes_per_window: int = Field(default=6, gt=0)
@@ -75,6 +93,8 @@ class Settings(BaseSettings):
             raise ValueError("window_overlap_seconds must be smaller than analysis_window_seconds")
         if self.pre_roll_seconds > self.rolling_buffer_seconds:
             raise ValueError("pre_roll_seconds can't be longer than rolling_buffer_seconds")
+        if self.max_segment_seconds < 2 * self.fragment_seconds:
+            raise ValueError("max_segment_seconds must be at least two fragments")
         return self
 
     @property
@@ -98,11 +118,19 @@ class Settings(BaseSettings):
 
     @property
     def redis_url(self) -> str:
-        return f"redis://{self.redis_host}:{self.redis_port}/0"
+        return f"redis://{self.redis_host}:{self.redis_port}/{self.redis_db}"
 
     @property
     def mediamtx_rtsp_url(self) -> str:
         return f"rtsp://{self.mediamtx_host}:{self.mediamtx_rtsp_port}"
+
+    @property
+    def buffer_dir(self) -> Path:
+        return self.ingestion_data_dir / "buffer"
+
+    @property
+    def outbox_dir(self) -> Path:
+        return self.ingestion_data_dir / "outbox"
 
 
 @lru_cache

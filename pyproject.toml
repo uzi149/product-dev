@@ -53,6 +53,7 @@ testpaths = ["tests"]
 markers = [
     "integration: needs the Docker Compose services running",
     "models: loads AI models or calls a hosted API (skipped in CI)",
+    "live: streams through the MediaMTX RTSP server for a minute or more",
 ]
 
 [tool.ruff]

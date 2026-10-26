@@ -27,6 +27,10 @@ def pytest_collection_modifyitems(items):
                 "tests/api",
                 "tests/ingestion/test_file_ingest",
                 "tests/ingestion/test_tasks",
+                "tests/ingestion/test_live_pipeline",
+                "tests/ingestion/test_live_rtsp",
+                "tests/ingestion/test_outbox",
+                "tests/ingestion/test_supervisor",
             )
         ):
             item.add_marker(pytest.mark.integration)

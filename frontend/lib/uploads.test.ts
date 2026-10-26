@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { Upload } from "./types";
-import { isFinished, pollWhileRunning, UPLOAD_POLL_MS, uploadSummary } from "./uploads";
+import {
+  isFinished,
+  newlyFinished,
+  pollWhileRunning,
+  recentUploads,
+  rejectedUpload,
+  UPLOAD_POLL_MS,
+  uploadSummary,
+} from "./uploads";
 
 const upload = (overrides: Partial<Upload> = {}): Upload => ({
   id: "u1",
@@ -60,5 +68,59 @@ describe("polling", () => {
       UPLOAD_POLL_MS,
     );
     expect(pollWhileRunning([])).toBe(false);
+  });
+});
+
+describe("rejected uploads", () => {
+  it("are listed as failed with the API's reason", () => {
+    const rejected = rejectedUpload({
+      cameraId: "c1",
+      filename: "notes.txt",
+      startTimeIso: "2026-03-07T09:05:00.000Z",
+      error: "not a readable video",
+      now: new Date("2026-03-07T10:00:00Z"),
+    });
+    expect(rejected).toMatchObject({
+      camera_id: "c1",
+      filename: "notes.txt",
+      start_time: "2026-03-07T09:05:00.000Z",
+      status: "failed",
+      created_at: "2026-03-07T10:00:00.000Z",
+    });
+    expect(uploadSummary(rejected)).toBe("Failed: not a readable video");
+  });
+
+  it("get their own ids", () => {
+    const args = { cameraId: "c1", filename: "a", startTimeIso: "x", error: "e", now: new Date(0) };
+    expect(rejectedUpload(args).id).not.toBe(rejectedUpload(args).id);
+  });
+});
+
+describe("recentUploads", () => {
+  it("mixes stored and rejected uploads, newest first, up to the limit", () => {
+    const stored = [
+      upload({ id: "s2", created_at: "2026-03-07T09:30:00Z" }),
+      upload({ id: "s1", created_at: "2026-03-07T09:00:00.123456+00:00" }),
+    ];
+    const rejected = [upload({ id: "r1", created_at: "2026-03-07T09:15:00.000Z" })];
+    expect(recentUploads(stored, rejected).map((u) => u.id)).toEqual(["s2", "r1", "s1"]);
+    expect(recentUploads(stored, rejected, 2).map((u) => u.id)).toEqual(["s2", "r1"]);
+  });
+});
+
+describe("newlyFinished", () => {
+  it("finds uploads that were running and have finished", () => {
+    const before = [upload({ id: "a", status: "processing" }), upload({ id: "b", status: "done" })];
+    const after = [upload({ id: "a", status: "failed" }), upload({ id: "b", status: "done" })];
+    expect(newlyFinished(before, after).map((u) => u.id)).toEqual(["a"]);
+  });
+
+  it("counts a new upload that is already finished", () => {
+    expect(newlyFinished([], [upload({ id: "n", status: "done" })]).map((u) => u.id)).toEqual(["n"]);
+    expect(newlyFinished([], [upload({ id: "n", status: "pending" })])).toEqual([]);
+  });
+
+  it("finds nothing on the first load", () => {
+    expect(newlyFinished(undefined, [upload({ status: "done" })])).toEqual([]);
   });
 });

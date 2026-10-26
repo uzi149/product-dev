@@ -1,6 +1,24 @@
 # Sentinel infrastructure. The Python services and the frontend run natively (see README).
 # All ports are published on BIND_ADDRESS (default 127.0.0.1 = this machine only).
 
+# Simulated camera (profile `sim`), used by sim-cam-01 and sim-cam-02 below. The video is
+# re-encoded with a keyframe every second, as cameras send it, so the 5 s fragments of live
+# ingestion really are 5 s. The image is MediaMTX's own, with FFmpeg (same version as the server).
+x-sim-camera: &sim-camera
+  image: bluenviron/mediamtx:1.11.3-ffmpeg
+  profiles: [sim]
+  depends_on: [mediamtx]
+  restart: unless-stopped
+  entrypoint:
+    - sh
+    - -c
+    - >-
+      exec ffmpeg -hide_banner -loglevel warning -re -stream_loop -1 -i /video -an
+      -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p
+      -force_key_frames 'expr:gte(t,n_forced*1)'
+      -f rtsp -rtsp_transport tcp rtsp://mediamtx:8554/$$CAMERA_PATH
+  mem_limit: 256m
+
 name: sentinel
 
 services:
@@ -79,6 +97,35 @@ services:
     volumes:
       - ./infrastructure/mediamtx/mediamtx.yml:/mediamtx.yml:ro
     mem_limit: 256m
+
+  # Simulated cameras (profile `sim`): FFmpeg loops a video into MediaMTX as a live RTSP stream,
+  # read by live ingestion at rtsp://127.0.0.1:8554/cam-01 and cam-02. Make the default clips with
+  # `python -m tests.ingestion.videos test-data/sim`, or point SIM_CAM01_VIDEO / SIM_CAM02_VIDEO at
+  # any video. `docker compose stop sim-cam-01` interrupts one camera, `start` brings it back.
+  sim-cam-01:
+    <<: *sim-camera
+    environment:
+      CAMERA_PATH: cam-01
+    volumes:
+      - type: bind
+        source: ${SIM_CAM01_VIDEO:-./test-data/sim/cam-01.mp4}
+        target: /video
+        read_only: true
+        bind:
+          # A missing video is an error, not an empty folder created in its place.
+          create_host_path: false
+
+  sim-cam-02:
+    <<: *sim-camera
+    environment:
+      CAMERA_PATH: cam-02
+    volumes:
+      - type: bind
+        source: ${SIM_CAM02_VIDEO:-./test-data/sim/cam-02.mp4}
+        target: /video
+        read_only: true
+        bind:
+          create_host_path: false
 
 volumes:
   postgres_data:

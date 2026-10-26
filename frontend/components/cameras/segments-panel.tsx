@@ -1,27 +1,33 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
-import { Play } from "lucide-react";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { Play, X } from "lucide-react";
 import { useState } from "react";
+import { SegmentVideo } from "@/components/cameras/stored-media";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { formatDateTime, formatDuration, localInputToIso } from "@/lib/format";
-import type { Camera, Segment } from "@/lib/types";
+import { LIST_POLL_MS } from "@/lib/refresh";
+import type { Camera } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export function SegmentsPanel({ camera }: { camera: Camera }) {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
-  const [playing, setPlaying] = useState<Segment | null>(null);
+  // Only one segment plays at a time, in a player under its own row.
+  const [playingId, setPlayingId] = useState<string | null>(null);
 
   const start = localInputToIso(from) ?? undefined;
   const end = localInputToIso(to) ?? undefined;
   const segments = useQuery({
     queryKey: ["segments", camera.id, start, end],
     queryFn: () => api.segments({ cameraId: camera.id, start, end }),
+    refetchInterval: LIST_POLL_MS,
+    // A new From/To keeps the current list on screen until the new one arrives.
+    placeholderData: keepPreviousData,
   });
 
   return (
@@ -56,21 +62,6 @@ export function SegmentsPanel({ camera }: { camera: Camera }) {
         </div>
       </div>
 
-      {playing && (
-        <div className="border-b bg-black p-3">
-          <video
-            key={playing.id}
-            src={api.playbackUrl(playing.id)}
-            controls
-            autoPlay
-            className="mx-auto max-h-[420px] w-full rounded-lg"
-          />
-          <p className="mt-2 text-center font-mono text-[11px] text-muted-foreground">
-            {formatDateTime(playing.start_time)} · {formatDuration(playing.duration_ms)}
-          </p>
-        </div>
-      )}
-
       {segments.isPending && <p className="p-4 text-sm text-muted-foreground">Loading…</p>}
       {segments.isError && (
         <p role="alert" className="p-4 text-sm text-destructive">
@@ -84,30 +75,40 @@ export function SegmentsPanel({ camera }: { camera: Camera }) {
       )}
 
       <ul>
-        {segments.data?.map((segment) => (
-          <li
-            key={segment.id}
-            className={cn(
-              "grid grid-cols-[1fr_auto] items-center gap-3 border-b px-4 py-3 last:border-0",
-              playing?.id === segment.id && "bg-accent",
-            )}
-          >
-            <div>
-              <div className="font-mono text-xs">{formatDateTime(segment.start_time)}</div>
-              <div className="mt-1 text-[11px] text-muted-foreground">
-                {formatDuration(segment.duration_ms)}
-                {segment.width && segment.height ? ` · ${segment.width}×${segment.height}` : ""}
-                {segment.codec ? ` · ${segment.codec}` : ""}
+        {segments.data?.map((segment) => {
+          const isPlaying = playingId === segment.id;
+          return (
+            <li key={segment.id} className={cn("border-b last:border-0", isPlaying && "bg-accent")}>
+              <div className="grid grid-cols-[1fr_auto] items-center gap-3 px-4 py-3">
+                <div>
+                  <div className="font-mono text-xs">{formatDateTime(segment.start_time)}</div>
+                  <div className="mt-1 text-[11px] text-muted-foreground">
+                    {formatDuration(segment.duration_ms)}
+                    {segment.width && segment.height ? ` · ${segment.width}×${segment.height}` : ""}
+                    {segment.codec ? ` · ${segment.codec}` : ""}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline">{segment.status}</Badge>
+                  {isPlaying ? (
+                    <Button size="sm" variant="outline" onClick={() => setPlayingId(null)}>
+                      <X /> Close
+                    </Button>
+                  ) : (
+                    <Button size="sm" onClick={() => setPlayingId(segment.id)}>
+                      <Play /> Play
+                    </Button>
+                  )}
+                </div>
               </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <Badge variant="outline">{segment.status}</Badge>
-              <Button size="sm" onClick={() => setPlaying(segment)}>
-                <Play /> Play
-              </Button>
-            </div>
-          </li>
-        ))}
+              {isPlaying && (
+                <div className="bg-black p-3">
+                  <SegmentVideo segmentId={segment.id} />
+                </div>
+              )}
+            </li>
+          );
+        })}
       </ul>
     </section>
   );

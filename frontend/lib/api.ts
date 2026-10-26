@@ -5,6 +5,7 @@ import type {
   ConnectionTestResult,
   Health,
   Segment,
+  StaticPeriod,
   Upload,
 } from "./types";
 
@@ -24,7 +25,8 @@ export class ApiError extends Error {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`${API_URL}${path}`, init);
+    // react-query is the only cache for API data; never answer from the browser's HTTP cache.
+    response = await fetch(`${API_URL}${path}`, { cache: "no-store", ...init });
   } catch {
     throw new ApiError("The API is not reachable", null, true);
   }
@@ -42,6 +44,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
+/** A media URL for <img>/<video>; parameters that are null are left out. */
+export function mediaUrl(path: string, params: Record<string, string | number | null> = {}): string {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) if (value !== null) query.set(key, String(value));
+  return `${API_URL}${path}${query.size ? `?${query}` : ""}`;
+}
+
 const json = (method: string, body: unknown): RequestInit => ({
   method,
   headers: { "Content-Type": "application/json" },
@@ -56,13 +65,26 @@ export const api = {
     request<Camera>(`/cameras/${id}`, json("PATCH", input)),
   testConnection: (id: string) =>
     request<ConnectionTestResult>(`/cameras/${id}/test-connection`, { method: "POST" }),
-  segments: (params: { cameraId: string; start?: string; end?: string }) => {
-    const query = new URLSearchParams({ camera_id: params.cameraId, limit: "200" });
+  segments: (params: { cameraId: string; start?: string; end?: string; limit?: number }) => {
+    const query = new URLSearchParams({ camera_id: params.cameraId, limit: String(params.limit ?? 200) });
     if (params.start) query.set("start", params.start);
     if (params.end) query.set("end", params.end);
     return request<Segment[]>(`/segments?${query}`);
   },
-  playbackUrl: (segmentId: string) => `${API_URL}/segments/${segmentId}/playback`,
+  /** `attempt` > 0 after a failed load: a new URL, so the API signs a new MinIO link. */
+  playbackUrl: (segmentId: string, attempt = 0) =>
+    mediaUrl(`/segments/${segmentId}/playback`, { r: attempt || null }),
+  staticPeriods: (params: { cameraId: string; start?: string; end?: string }) => {
+    const query = new URLSearchParams({ camera_id: params.cameraId, limit: "500" });
+    if (params.start) query.set("start", params.start);
+    if (params.end) query.set("end", params.end);
+    return request<StaticPeriod[]>(`/static-periods?${query}`);
+  },
+  referenceFrameUrl: (periodId: string, attempt = 0) =>
+    mediaUrl(`/static-periods/${periodId}/reference-frame`, { r: attempt || null }),
+  /** `version` (the snapshot time) makes the browser load a new picture when it changes. */
+  snapshotUrl: (cameraId: string, version: string | null, attempt = 0) =>
+    mediaUrl(`/cameras/${cameraId}/snapshot`, { v: version, r: attempt || null }),
   upload: (id: string) => request<Upload>(`/videos/uploads/${id}`),
   uploads: (cameraId: string) =>
     request<Upload[]>(`/videos/uploads?${new URLSearchParams({ camera_id: cameraId, limit: "10" })}`),
