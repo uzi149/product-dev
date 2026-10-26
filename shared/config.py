@@ -6,9 +6,10 @@ hard-coded behaviour. Defaults are the "Initial configuration" values.
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 from urllib.parse import quote
 
-from pydantic import Field, model_validator
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -43,6 +44,21 @@ class Settings(BaseSettings):
 
     # Encrypts camera source URIs (ADR 0008)
     fernet_key: str = ""
+
+    # Vision-language model (ADR 0019). "auto": the OpenAI-compatible API when a key is set,
+    # otherwise the local model in this process. With a key, frames go to that server: test
+    # videos only; real camera footage needs a local server (vlm_base_url) or no key.
+    vlm_backend: Literal["auto", "api", "local"] = "auto"
+    vlm_base_url: str = "https://openrouter.ai/api/v1"
+    vlm_api_key: SecretStr = SecretStr("")
+    # The reference code's name for the same key; used when VLM_API_KEY is empty.
+    openrouter_api_key: SecretStr = SecretStr("")
+    vlm_model: str = "qwen/qwen3-vl-30b-a3b-instruct"
+    vlm_local_model: str = "Qwen/Qwen2.5-VL-3B-Instruct"
+    # Longest side of every image sent to the model.
+    vlm_image_max_side: int = Field(default=640, ge=64)
+    vlm_timeout_seconds: float = Field(default=180, gt=0)
+    vlm_max_retries: int = Field(default=6, ge=0)
 
     # API
     max_upload_mb: int = Field(default=2048, gt=0)
@@ -115,6 +131,11 @@ class Settings(BaseSettings):
     @property
     def minio_signing_endpoint(self) -> str:
         return self.minio_public_endpoint or self.minio_endpoint
+
+    @property
+    def vlm_key(self) -> str:
+        """The VLM API key: VLM_API_KEY, else OPENROUTER_API_KEY, else empty (local model)."""
+        return self.vlm_api_key.get_secret_value() or self.openrouter_api_key.get_secret_value()
 
     @property
     def redis_url(self) -> str:

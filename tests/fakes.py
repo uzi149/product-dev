@@ -1,6 +1,34 @@
 """Small stand-ins for services in unit tests (no new test packages)."""
 
+from collections.abc import Callable
+
 import redis
+
+from shared.model_adapters.vlm import VLMError, VLMReply
+
+
+class FakeVLM:
+    """A VLM with scripted answers. Each item of `replies` is the text to answer, an exception
+    to raise, or a function of (frames, prompt) returning the text. The last item repeats."""
+
+    def __init__(self, replies: list[str | VLMError | Callable], model: str = "fake-vlm"):
+        self.replies = list(replies)
+        self.model = model
+        self.calls: list[dict] = []
+
+    @property
+    def name(self) -> str:
+        return self.model
+
+    def complete(self, frames, prompt, *, system=None, max_tokens=800) -> VLMReply:
+        self.calls.append(
+            {"frames": len(frames), "prompt": prompt, "system": system, "max_tokens": max_tokens}
+        )
+        reply = self.replies.pop(0) if len(self.replies) > 1 else self.replies[0]
+        if isinstance(reply, VLMError):
+            raise reply
+        text = reply(frames, prompt) if callable(reply) else reply
+        return VLMReply(text=text, model=self.model, latency_ms=1)
 
 
 class FakeRedis:

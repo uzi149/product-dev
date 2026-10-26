@@ -1,5 +1,6 @@
 """Shared fixtures. Database tests use a scratch database, never the development one."""
 
+import os
 import socket
 from pathlib import Path
 
@@ -19,7 +20,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def pytest_collection_modifyitems(items):
+    # Model tests download gigabytes or make paid API calls: only on request (CI never runs them).
+    run_models = os.environ.get("RUN_MODEL_TESTS") == "1"
+    skip_models = pytest.mark.skip(
+        reason="loads AI models or calls a hosted API: RUN_MODEL_TESTS=1"
+    )
     for item in items:
+        if "models" in item.keywords and not run_models:
+            item.add_marker(skip_models)
         node = item.nodeid.replace("\\", "/")
         if node.startswith(
             (
