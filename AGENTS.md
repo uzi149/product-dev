@@ -72,7 +72,10 @@ time. For every step, follow this order:
    `docs/MVP-implementation-plan.md` to reflect the decisions, and link the step plan
    and its ADRs from it.
 5. **Get approval, then code.** Start coding only after the user approves the step plan.
-   Commit the step plan and ADRs on the same feature branch as the code.
+
+`docs/` is git-ignored and stays on the local machine. Write and update the step plans, ADRs,
+the MVP plan and the testing guide there, but never commit or push anything under `docs/`, and
+don't change `.gitignore` to track it. A PR can say that its plan and ADRs are local.
 
 If a new decision comes up while coding, stop, ask, then add the ADR and update both plans
 before continuing.
@@ -87,6 +90,7 @@ before continuing.
 - `main` is for releases only. When a release is needed, `develop` is merged into
   `main` through a release PR.
 - Never commit or push directly to `develop` or `main`.
+- Never commit or push `docs/` (see "MVP workflow" above).
 
 ## Project context
 
