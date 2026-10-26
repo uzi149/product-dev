@@ -113,13 +113,16 @@ test("add a camera, upload a video, and play the active part that was stored", a
   await expect(row).toContainText("Mar 07, 2026"); // shown in local time, same day in any timezone offset <= 9h
 
   await row.getByRole("button", { name: "Play" }).click();
-  const video = page.locator("video");
+  const video = row.locator("video");
   await expect(video).toBeVisible();
   await expect
     .poll(() => video.evaluate((v: HTMLVideoElement) => v.readyState >= 2 && v.videoWidth), {
       timeout: 30_000,
     })
     .toBe(640);
+  await row.getByRole("button", { name: "Close" }).click();
+  await expect(video).toHaveCount(0);
+  await expect(row.getByRole("button", { name: "Play" })).toBeVisible();
 
   // The timeline opens zoomed to the footage of its day: the stored part and the still parts.
   const timeline = page.getByRole("region", { name: "Timeline" });
