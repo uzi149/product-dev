@@ -25,8 +25,13 @@ How to use it:
   `shared/model_adapters/` or `shared/video/`.
 - Take only what the task needs. Leave out its YOLO-World, ByteTracker, visualizers,
   Flask webapp, CLI and LangChain wrappers.
-- Remove anything that sends footage off the local network, such as the hosted
-  OpenRouter default. A local vLLM server is the default endpoint here.
+- Keep the reference code's VLM backend choice: the OpenRouter API is the default when its
+  key is set, and the local in-process model is the fallback when it isn't (ADR 0019). Keep
+  the endpoint configurable (`VLM_BASE_URL`) so the pilot can point it at a local vLLM server.
+  Only test videos may be analysed through OpenRouter; real camera footage stays on the local
+  network.
+- Embeddings always run locally (ADR 0020); don't add a hosted embedding service or a
+  run-time fallback between embedding models.
 
 ## Naming rule: no reference-repo name in this codebase
 

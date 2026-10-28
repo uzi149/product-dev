@@ -63,7 +63,7 @@ python -m venv .venv
 source .venv/bin/activate         # Linux / macOS
 
 pip install -e ".[dev]"           # backend + test tools
-pip install -e ".[dev,vlm]"       # also the local Qwen VLM (torch, transformers; several GB)
+pip install -e ".[dev,vlm]"       # also the local Qwen VLM fallback (torch, transformers; several GB)
 ```
 
 Dependencies are declared in `pyproject.toml`. Exact versions are pinned in
@@ -234,6 +234,37 @@ To loop other videos instead, set `SIM_CAM01_VIDEO` / `SIM_CAM02_VIDEO` in `.env
 cameras on the Cameras page (type RTSP, the URLs above). To test a dropped stream, use
 `docker compose stop sim-cam-01`, then `docker compose start sim-cam-01`.
 `docker compose --profile sim down` stops everything, including the sim cameras.
+
+## Vision-language model (VLM)
+
+From Phase 3, a VLM describes the stored footage (ADR 0019). The code is adapted from a proven
+reference implementation: one OpenAI-compatible client, and one in-process fallback.
+
+- **With an API key** (`VLM_API_KEY`, or `OPENROUTER_API_KEY`, in `.env`): OpenRouter, model
+  `qwen/qwen3-vl-30b-a3b-instruct`, about 5–10 s per request. Get a key at
+  https://openrouter.ai/keys. **With a key set, frames of the analysed footage are sent to
+  OpenRouter: use it only with test videos.**
+- **Without a key:** `Qwen/Qwen2.5-VL-3B-Instruct` runs inside the process on the CPU. It needs
+  `pip install -e ".[dev,vlm]"` (torch, torchvision, transformers, pillow) and about 7.5 GB of
+  **free** memory, downloads the model (about 7 GB) on first use, and takes a minute or more per
+  request.
+- **The pilot** points `VLM_BASE_URL` at its own vLLM server (with `VLM_BACKEND=api` and no key),
+  so real footage stays on the local network. No code change.
+
+`VLM_BACKEND=auto` (the default) picks the API when a key is set; `api` / `local` force one. The
+other `VLM_*` settings are in `.env.example`.
+
+Check the setup with one picture:
+
+```bash
+python -m shared.model_adapters.check_vlm                  # a generated picture: a red ball and a blue box
+python -m shared.model_adapters.check_vlm photo.jpg        # your own picture(s)
+python -m shared.model_adapters.check_vlm --backend local  # force the in-process model
+```
+
+It prints the backend, the model, the time taken, the token counts and the answer. Tests that
+call the real models are marked `models` and run only with `RUN_MODEL_TESTS=1`
+(`RUN_MODEL_TESTS=1 pytest -m models`); CI never runs them.
 
 ## Run the UI
 
