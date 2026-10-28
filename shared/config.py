@@ -106,6 +106,12 @@ class Settings(BaseSettings):
     stream_stall_seconds: int = Field(default=15, gt=0)
     reconnect_max_backoff_seconds: int = Field(default=30, gt=0)
 
+    # Automatic VLM analysis of new segments (ADR 0022). Off: ingestion queues nothing and new
+    # segments stay `pending` until `python -m services.analysis.requeue` queues them.
+    analysis_enabled: bool = True
+    # On start, an analysis worker queues the `pending` segments of this many past hours.
+    analysis_sweep_hours: int = Field(default=24, ge=0)
+
     # MVP plan §2
     keyframes_per_window: int = Field(default=6, gt=0)
     default_retention_days: int = Field(default=14, gt=0)

@@ -219,6 +219,8 @@ class AnalysisWindow(Base):
     processing_status: Mapped[str] = mapped_column(
         String(20), server_default=ProcessingStatus.PENDING.value
     )
+    # Why the window failed (step 3.3); empty otherwise.
+    error: Mapped[str | None] = mapped_column(Text)
 
     segment: Mapped[VideoSegment] = relationship(back_populates="windows")
     keyframes: Mapped[list["Keyframe"]] = relationship(

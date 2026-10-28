@@ -37,6 +37,8 @@ E2E_ENV = {
     "INGESTION_DATA_DIR": str(Path("data") / "e2e"),
     # New cameras are picked up quicker than the default 30 s.
     "CAMERA_RELOAD_SECONDS": "5",
+    # No VLM calls or embedding models in the UI tests; new segments stay pending.
+    "ANALYSIS_ENABLED": "false",
 }
 READY_TIMEOUT = 90
 

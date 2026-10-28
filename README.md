@@ -168,15 +168,18 @@ uvicorn services.api.main:app --reload     # http://127.0.0.1:8000  (docs at /do
 
 ## Run a worker
 
-Uploads are processed in the background by a Celery worker (ADR 0011), using Redis from the
-Docker stack as the queue. Needs FFmpeg on `PATH`, like the API.
+Uploads and the VLM analysis of stored footage are processed in the background by a Celery
+worker (ADR 0011), using Redis from the Docker stack as the queue. Needs FFmpeg on `PATH`, like
+the API.
 
 ```bash
-celery -A shared.jobs.celery_app worker --pool=solo -Q default
+celery -A shared.jobs.celery_app worker --pool=solo -Q default,analysis
 ```
 
 `--pool=solo` is needed on Windows. Without a running worker, uploads stay `pending` and are
-processed as soon as one starts.
+processed as soon as one starts. A worker on `analysis` also loads the embedding models (about
+2 GB). To keep a long analysis backlog from holding up uploads, run two workers instead: one on
+`-Q default` and one on `-Q analysis`.
 
 Camera source URIs are encrypted with `FERNET_KEY` and never returned by the API. The key in
 `.env.example` is a **shared development key**: generate a private one
@@ -272,6 +275,31 @@ python -m shared.model_adapters.check_vlm --backend local  # force the in-proces
 It prints the backend, the model, the time taken, the token counts and the answer. Tests that
 call the real models are marked `models` and run only with `RUN_MODEL_TESTS=1`
 (`RUN_MODEL_TESTS=1 pytest -m models`); CI never runs them.
+
+## Analysis of stored footage
+
+Every new segment, live or uploaded, is analysed automatically (ADR 0021): it is cut into 12 s
+windows that overlap by 3 s; per window, 6 keyframes are saved to MinIO, the VLM describes the
+window as structured JSON (summary, people and objects, actions from a fixed vocabulary,
+uncertainties, confidence), and the description and keyframes are embedded into the two search
+indexes. With OpenRouter a window takes about 5–10 s.
+
+Each segment and window has a status (`pending` → `processing` → `done` / `failed`). Temporary
+trouble (VLM, MinIO or PostgreSQL unreachable) is retried after 30 s, 2 min and 10 min; a
+rejected request or a used-up quota fails at once, with the provider's message.
+
+```bash
+python -m services.analysis.inspect SEGMENT_ID                   # what the VLM wrote, with keyframe links
+python -m services.analysis.inspect --camera "Front door" --latest 3
+python -m services.analysis.requeue --status pending --since 2h  # queue footage on purpose
+python -m services.analysis.requeue --status failed              # retry after fixing the cause
+```
+
+Footage stored before Phase 3 is `pending`: queue it with `requeue` (with an API key this sends
+its keyframes to OpenRouter, so test videos only). On start, an analysis worker queues the
+`pending` segments of the last 24 h (`ANALYSIS_SWEEP_HOURS`). `ANALYSIS_ENABLED=false` turns
+automatic analysis off (ADR 0022): new segments stay `pending` until requeued. The e2e stack runs
+with analysis off.
 
 ## Embedding models
 

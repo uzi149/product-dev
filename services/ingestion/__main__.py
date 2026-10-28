@@ -22,6 +22,7 @@ from shared.camera_status import HeartbeatLock, get_redis
 from shared.config import get_settings
 from shared.crypto import CryptoError, check_key
 from shared.database.session import get_sessionmaker
+from shared.jobs.celery_app import request_analysis
 from shared.storage import get_storage
 from shared.video.ffmpeg import FFmpegNotInstalled, _require
 
@@ -85,7 +86,13 @@ def main() -> int:
 
     board = StatusBoard()
     storage = get_storage()
-    uploader = Uploader(outbox, storage, get_sessionmaker())
+    uploader = Uploader(
+        outbox,
+        storage,
+        get_sessionmaker(),
+        on_segment_stored=lambda segment_id: request_analysis([segment_id], settings),
+    )
+    log.info("automatic analysis of new segments: %s", "on" if settings.analysis_enabled else "off")
     publisher = StatusPublisher(board, client, storage, lock, settings.camera_status_ttl_seconds)
     stop = threading.Event()
     threads = [
