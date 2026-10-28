@@ -63,24 +63,27 @@ export function newlyFinished(before: Upload[] | undefined, after: Upload[]): Up
   });
 }
 
-/** An upload's import state for the operator: badge text and a hover hint. */
+/** An upload's processing state for the operator: badge text and a hover hint. */
 export function uploadStatus(upload: Upload): { label: string; hint: string } {
   switch (upload.status) {
     case "pending":
-      return { label: "Import queued", hint: "Waiting for a worker to read the file" };
+      return { label: "Upload queued", hint: "Waiting for a worker to read the file" };
     case "processing":
-      return { label: "Importing…", hint: "Finding the active parts and storing them as segments" };
+      return {
+        label: "Processing upload…",
+        hint: "Finding the active parts and storing them as segments",
+      };
     case "done":
       return {
-        label: "Imported",
+        label: "Upload processed",
         hint: "Active parts are under Stored segments, each analysed separately",
       };
     case "failed":
-      return { label: "Import failed", hint: "The file could not be imported" };
+      return { label: "Upload failed", hint: "The file could not be processed" };
   }
 }
 
-const plural =(n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /** One line for the operator: "2 active parts stored", "Processing…", the error, … */
 export function uploadSummary(upload: Upload): string {

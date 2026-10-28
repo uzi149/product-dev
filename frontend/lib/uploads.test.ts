@@ -26,11 +26,11 @@ const upload = (overrides: Partial<Upload> = {}): Upload => ({
 });
 
 describe("uploadStatus", () => {
-  it("names each import state, apart from the analysis of its segments", () => {
-    expect(uploadStatus(upload()).label).toBe("Import queued");
-    expect(uploadStatus(upload({ status: "processing" })).label).toBe("Importing…");
-    expect(uploadStatus(upload({ status: "done" })).label).toBe("Imported");
-    expect(uploadStatus(upload({ status: "failed" })).label).toBe("Import failed");
+  it("names each upload state, apart from the analysis of its segments", () => {
+    expect(uploadStatus(upload()).label).toBe("Upload queued");
+    expect(uploadStatus(upload({ status: "processing" })).label).toBe("Processing upload…");
+    expect(uploadStatus(upload({ status: "done" })).label).toBe("Upload processed");
+    expect(uploadStatus(upload({ status: "failed" })).label).toBe("Upload failed");
     expect(uploadStatus(upload({ status: "done" })).hint).toMatch(/each analysed separately/);
   });
 });

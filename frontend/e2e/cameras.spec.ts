@@ -114,7 +114,7 @@ test("add a camera, upload a video, and play the active part that was stored", a
   });
   const recent = page.locator("section", { hasText: "Recent uploads" }).getByRole("listitem");
   await expect(recent).toHaveCount(1);
-  await expect(recent).toContainText("Imported");
+  await expect(recent).toContainText("Upload processed");
 
   const row = page.locator("section", { hasText: "Stored segments" }).getByRole("listitem");
   await expect(row).toHaveCount(1);
@@ -161,7 +161,7 @@ test("a video where nothing happens stores no footage", async ({ page }) => {
   );
   await expect(
     page.locator("section", { hasText: "Recent uploads" }).getByRole("listitem"),
-  ).toContainText("Imported");
+  ).toContainText("Upload processed");
   await expect(page.getByText("No footage stored for this camera yet.")).toBeVisible();
   await expect(page.getByRole("listitem").filter({ hasText: name })).toContainText("0 segments");
 });
@@ -184,7 +184,7 @@ test("an invalid upload shows the API's error, lists it as failed and stores not
   const row = page.locator("section", { hasText: "Recent uploads" }).getByRole("listitem");
   await expect(row).toHaveCount(1);
   await expect(row).toContainText("notes.mp4");
-  await expect(row).toContainText("Import failed");
+  await expect(row).toContainText("Upload failed");
   await expect(row).toContainText(/Failed: not a readable video/);
   await expect(page.getByText("No footage stored for this camera yet.")).toBeVisible();
 });
