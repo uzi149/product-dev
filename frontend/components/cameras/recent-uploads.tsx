@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { api } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import { invalidateCameraData, LIST_POLL_MS } from "@/lib/refresh";
+import { STATUS_TONE } from "@/lib/status";
 import type { Camera, Upload } from "@/lib/types";
 import {
   newlyFinished,
@@ -13,6 +14,7 @@ import {
   RECENT_UPLOADS,
   recentUploads,
   rejectedUploadsKey,
+  uploadStatus,
   uploadSummary,
 } from "@/lib/uploads";
 
@@ -60,8 +62,12 @@ export function RecentUploads({ camera }: { camera: Camera }) {
                 Recorded {formatDateTime(upload.start_time)} · {uploadSummary(upload)}
               </div>
             </div>
-            <Badge variant={upload.status === "failed" ? "destructive" : "outline"}>
-              {upload.status}
+            <Badge
+              variant="outline"
+              title={uploadStatus(upload).hint}
+              className={STATUS_TONE[upload.status]}
+            >
+              {uploadStatus(upload).label}
             </Badge>
           </li>
         ))}

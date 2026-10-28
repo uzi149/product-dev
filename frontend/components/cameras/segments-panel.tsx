@@ -11,6 +11,8 @@ import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { formatDateTime, formatDuration, localInputToIso } from "@/lib/format";
 import { LIST_POLL_MS } from "@/lib/refresh";
+import { segmentStatus } from "@/lib/segments";
+import { STATUS_TONE } from "@/lib/status";
 import type { Camera } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -89,7 +91,13 @@ export function SegmentsPanel({ camera }: { camera: Camera }) {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Badge variant="outline">{segment.status}</Badge>
+                  <Badge
+                    variant="outline"
+                    title={segmentStatus(segment.status).hint}
+                    className={STATUS_TONE[segment.status]}
+                  >
+                    {segmentStatus(segment.status).label}
+                  </Badge>
                   {isPlaying ? (
                     <Button size="sm" variant="outline" onClick={() => setPlayingId(null)}>
                       <X /> Close

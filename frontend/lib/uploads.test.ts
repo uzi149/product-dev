@@ -7,6 +7,7 @@ import {
   recentUploads,
   rejectedUpload,
   UPLOAD_POLL_MS,
+  uploadStatus,
   uploadSummary,
 } from "./uploads";
 
@@ -22,6 +23,16 @@ const upload = (overrides: Partial<Upload> = {}): Upload => ({
   created_at: "2026-03-07T09:06:00Z",
   finished_at: null,
   ...overrides,
+});
+
+describe("uploadStatus", () => {
+  it("names each upload state, apart from the analysis of its segments", () => {
+    expect(uploadStatus(upload()).label).toBe("Upload queued");
+    expect(uploadStatus(upload({ status: "processing" })).label).toBe("Processing upload…");
+    expect(uploadStatus(upload({ status: "done" })).label).toBe("Upload processed");
+    expect(uploadStatus(upload({ status: "failed" })).label).toBe("Upload failed");
+    expect(uploadStatus(upload({ status: "done" })).hint).toMatch(/each analysed separately/);
+  });
 });
 
 describe("uploadSummary", () => {
