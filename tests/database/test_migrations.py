@@ -19,6 +19,7 @@ EXPECTED_TABLES = {
     "query_sessions",
     "query_results",
     "uploads",
+    "index_settings",
 }
 
 
@@ -74,6 +75,13 @@ def test_indexes_from_scope_5_3_exist(engine):
 
 def test_uploads_migration_downgrades_on_its_own(migrated_db, alembic_config):
     command.downgrade(alembic_config, "0001")
-    assert _tables(migrated_db) == EXPECTED_TABLES - {"uploads"}
+    assert _tables(migrated_db) == EXPECTED_TABLES - {"uploads", "index_settings"}
     command.upgrade(alembic_config, "head")
     assert "uploads" in _tables(migrated_db)
+
+
+def test_index_settings_migration_downgrades_on_its_own(migrated_db, alembic_config):
+    command.downgrade(alembic_config, "0002")
+    assert _tables(migrated_db) == EXPECTED_TABLES - {"index_settings"}
+    command.upgrade(alembic_config, "head")
+    assert "index_settings" in _tables(migrated_db)

@@ -102,5 +102,6 @@ before continuing.
 - Requirements: `docs/Local VLM Camera Intelligence Platform — Technical Scope.pdf`
 - Open decisions and answers: `docs/MVP-open-questions.md`; settled decisions go in `docs/ADRs/`
 - Python 3.12, `venv` + `pip`, dependencies in `pyproject.toml`
-  (`pip install -e ".[dev]"`, add `vlm` for local Qwen). After changing dependencies,
+  (`pip install -e ".[dev]"`, which includes torch and transformers for the local models; on
+  Linux install the CPU build of torch first, see the README). After changing dependencies,
   regenerate `requirements.lock` with `pip freeze --exclude-editable > requirements.lock`.

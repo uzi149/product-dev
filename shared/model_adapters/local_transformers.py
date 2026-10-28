@@ -36,7 +36,7 @@ _MODEL_CLASS_CANDIDATES = [
     "AutoModelForImageTextToText",
     "AutoModelForVision2Seq",
 ]
-_INSTALL_HINT = 'the local VLM needs torch, torchvision and transformers: pip install -e ".[vlm]"'
+_INSTALL_HINT = "the local VLM needs torch, torchvision and transformers: pip install -e ."
 # Qwen-VL's own default lower bound (56 x 56 pixels).
 _MIN_PIXELS = 56 * 56
 

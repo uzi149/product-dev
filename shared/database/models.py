@@ -28,7 +28,8 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-# Fixed per installation (ADR 0006): bge-base-en-v1.5 text, siglip-base-patch16-224 image.
+# Both indexes (ADR 0006). The models are fixed per installation and recorded in
+# index_settings (ADR 0020): bge-base-en-v1.5 text, siglip2-base-patch16-224 pictures.
 EMBEDDING_DIM = 768
 
 
@@ -51,6 +52,11 @@ class HealthStatus(enum.StrEnum):
 
 class EmbeddingType(enum.StrEnum):
     DESCRIPTION = "description"
+
+
+class IndexName(enum.StrEnum):
+    TEXT = "text"
+    VISUAL = "visual"
 
 
 class EventStatus(enum.StrEnum):
@@ -387,3 +393,15 @@ class QueryResult(Base):
     sequence_group_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
 
     session: Mapped[QuerySession] = relationship(back_populates="results")
+
+
+class IndexSetting(Base):
+    """The embedding model each index was built with (ADR 0020), recorded on first use."""
+
+    __tablename__ = "index_settings"
+    __table_args__ = (_one_of("index_name", IndexName, "index_name"),)
+
+    index_name: Mapped[str] = mapped_column(String(20), primary_key=True)
+    model_name: Mapped[str] = mapped_column(String(200))
+    dimensions: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = _created_at()

@@ -1,9 +1,18 @@
-"""Model adapters: the vision-language model (ADR 0019); embedding models follow in step 3.2."""
+"""Model adapters: the vision-language model (ADR 0019) and the local embedding models (ADR 0020)."""
 
 import logging
 from functools import lru_cache
 
 from shared.config import Settings, get_settings
+from shared.model_adapters.embeddings import (
+    EmbeddingError,
+    ImageEmbedder,
+    TextEmbedder,
+    build_image_embedder,
+    build_text_embedder,
+    get_image_embedder,
+    get_text_embedder,
+)
 from shared.model_adapters.vlm import (
     VisionLanguageModel,
     VLMError,
@@ -14,13 +23,20 @@ from shared.model_adapters.vlm import (
 )
 
 __all__ = [
+    "EmbeddingError",
+    "ImageEmbedder",
+    "TextEmbedder",
     "VLMError",
     "VLMQuotaExhausted",
     "VLMReply",
     "VLMRequestRejected",
     "VLMUnavailable",
     "VisionLanguageModel",
+    "build_image_embedder",
+    "build_text_embedder",
     "build_vlm",
+    "get_image_embedder",
+    "get_text_embedder",
     "get_vlm",
     "resolve_vlm_backend",
 ]
