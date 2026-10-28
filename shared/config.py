@@ -60,6 +60,13 @@ class Settings(BaseSettings):
     vlm_timeout_seconds: float = Field(default=180, gt=0)
     vlm_max_retries: int = Field(default=6, ge=0)
 
+    # Embedding models, always local and fixed per installation (ADR 0020): recorded in
+    # `index_settings` on first use; a process configured for other models is refused.
+    text_embedding_model: str = "BAAI/bge-base-en-v1.5"
+    image_embedding_model: str = "google/siglip2-base-patch16-224"
+    # CPU threads for the embedding models; 0 = half the cores, so FFmpeg and the API keep some.
+    embedding_threads: int = Field(default=0, ge=0)
+
     # API
     max_upload_mb: int = Field(default=2048, gt=0)
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"

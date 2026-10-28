@@ -3,10 +3,8 @@
 - The API test calls the configured server (OpenRouter with a key in .env): a fraction of a cent.
 - The tiny-model test downloads a few MB and checks the local code path in about 20 s.
 - The local test loads Qwen2.5-VL-3B on the CPU: about 7.5 GB of free memory and several
-  minutes. Both need `pip install -e ".[vlm]"`.
+  minutes.
 """
-
-import importlib.util
 
 import pytest
 
@@ -35,12 +33,6 @@ def test_the_api_backend_describes_a_picture():
     assert reply.latency_ms < 60_000
 
 
-needs_vlm_extra = pytest.mark.skipif(
-    importlib.util.find_spec("transformers") is None, reason='needs pip install -e ".[vlm]"'
-)
-
-
-@needs_vlm_extra
 def test_the_local_code_path_runs_with_a_tiny_random_model():
     """Loading, chat template, generation and decoding with the installed Transformers version,
     on a few-MB random-weight Qwen-VL (its answer is gibberish; only the path is checked)."""
@@ -55,7 +47,6 @@ def test_the_local_code_path_runs_with_a_tiny_random_model():
     assert 500 < reply.prompt_tokens < 800
 
 
-@needs_vlm_extra
 def test_the_local_backend_describes_a_picture():
     settings = Settings().model_copy(update={"vlm_backend": "local"})
     reply = build_vlm(settings).complete([sample_picture()], PROMPT, max_tokens=60)

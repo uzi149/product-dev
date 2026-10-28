@@ -62,8 +62,13 @@ python -m venv .venv
 .venv\Scripts\activate            # Windows
 source .venv/bin/activate         # Linux / macOS
 
-pip install -e ".[dev]"           # backend + test tools
-pip install -e ".[dev,vlm]"       # also the local Qwen VLM fallback (torch, transformers; several GB)
+pip install -e ".[dev]"           # backend, local models (torch, transformers) and test tools
+```
+
+On Linux, install the CPU build of torch first, or pip downloads the much larger CUDA build:
+
+```bash
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 ```
 
 Dependencies are declared in `pyproject.toml`. Exact versions are pinned in
@@ -79,6 +84,9 @@ To install the exact pinned versions (e.g. on the pilot machine):
 pip install -r requirements.lock
 pip install -e . --no-deps
 ```
+
+On Linux add `--extra-index-url https://download.pytorch.org/whl/cpu` to the first command, so
+the CPU build of torch is installed.
 
 ## Run the infrastructure
 
@@ -245,8 +253,7 @@ reference implementation: one OpenAI-compatible client, and one in-process fallb
   https://openrouter.ai/keys. **With a key set, frames of the analysed footage are sent to
   OpenRouter: use it only with test videos.**
 - **Without a key:** `Qwen/Qwen2.5-VL-3B-Instruct` runs inside the process on the CPU. It needs
-  `pip install -e ".[dev,vlm]"` (torch, torchvision, transformers, pillow) and about 7.5 GB of
-  **free** memory, downloads the model (about 7 GB) on first use, and takes a minute or more per
+  about 7.5 GB of **free** memory, downloads the model (about 7 GB) on first use, and takes a minute or more per
   request.
 - **The pilot** points `VLM_BASE_URL` at its own vLLM server (with `VLM_BACKEND=api` and no key),
   so real footage stays on the local network. No code change.
@@ -265,6 +272,33 @@ python -m shared.model_adapters.check_vlm --backend local  # force the in-proces
 It prints the backend, the model, the time taken, the token counts and the answer. Tests that
 call the real models are marked `models` and run only with `RUN_MODEL_TESTS=1`
 (`RUN_MODEL_TESTS=1 pytest -m models`); CI never runs them.
+
+## Embedding models
+
+Search compares vectors (embeddings): one for each VLM description (the text index) and one for
+each keyframe (the visual index). Both models always run locally on the CPU (ADR 0020):
+
+| Index | Model | Memory |
+|---|---|---|
+| Text: descriptions and typed queries | `BAAI/bge-base-en-v1.5` (768 values) | about 0.4 GB |
+| Visual: keyframes, and typed text compared with them | `google/siglip2-base-patch16-224` (768 values) | about 1.5 GB |
+
+Every process that analyses or searches loads its own copy. The models download from Hugging
+Face on first use (about 2 GB); fetch them ahead of time, then check sizes, speed and a small
+ranking test:
+
+```bash
+python -m shared.model_adapters.download_models
+python -m shared.model_adapters.check_embeddings
+```
+
+After the download a machine can run offline with `HF_HUB_OFFLINE=1`. `EMBEDDING_THREADS` limits
+the CPU threads (default: half the cores).
+
+The models are **fixed per installation**: the first use records them in the `index_settings`
+table, and a process configured for other models (`TEXT_EMBEDDING_MODEL`,
+`IMAGE_EMBEDDING_MODEL`) refuses to start, because vectors from different models can't be
+compared. Changing a model means analysing the footage again.
 
 ## Run the UI
 

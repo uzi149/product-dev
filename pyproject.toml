@@ -31,17 +31,17 @@ dependencies = [
     "numpy>=1.26",
     # HTTP client for the OpenAI-compatible VLM API (OpenRouter, or vLLM on the pilot); also used by FastAPI's TestClient
     "httpx>=0.27",
-]
-
-[project.optional-dependencies]
-# In-process Qwen-VL: the VLM fallback when no API key is set (ADR 0019, scope §4 "Development VLM").
-vlm = [
+    # Local models: the embedding models, which always run locally (ADR 0020), and the
+    # in-process Qwen-VL fallback when no VLM key is set (ADR 0019). On Linux, install the CPU
+    # build of torch (see the README) unless the machine has a GPU.
     "torch>=2.4",
     # Transformers 5 loads Qwen-VL's video processor with the image one; it needs torchvision.
     "torchvision>=0.19",
-    "transformers>=4.49",
+    "transformers>=4.56",
     "pillow>=10.0",
 ]
+
+[project.optional-dependencies]
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",

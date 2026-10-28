@@ -1,9 +1,12 @@
 """Small stand-ins for services in unit tests (no new test packages)."""
 
+import hashlib
 from collections.abc import Callable
 
+import numpy as np
 import redis
 
+from shared.database.models import EMBEDDING_DIM
 from shared.model_adapters.vlm import VLMError, VLMReply
 
 
@@ -29,6 +32,55 @@ class FakeVLM:
             raise reply
         text = reply(frames, prompt) if callable(reply) else reply
         return VLMReply(text=text, model=self.model, latency_ms=1)
+
+
+def fake_vector(key: bytes) -> np.ndarray:
+    """A normalised EMBEDDING_DIM vector that depends only on `key`."""
+    seed = int.from_bytes(hashlib.sha256(key).digest()[:8], "big")
+    vector = np.random.default_rng(seed).standard_normal(EMBEDDING_DIM).astype(np.float32)
+    return vector / np.linalg.norm(vector)
+
+
+class FakeTextEmbedder:
+    """Deterministic vectors: the same text always gives the same vector; queries are marked so
+    a query and a document of the same text differ, as with the real query instruction."""
+
+    def __init__(self, model: str = "fake-text-embedder"):
+        self.model = model
+        self.calls: list[list[str]] = []
+
+    @property
+    def name(self) -> str:
+        return self.model
+
+    def embed_documents(self, texts: list[str]) -> np.ndarray:
+        self.calls.append(list(texts))
+        rows = [fake_vector(t.encode()) for t in texts]
+        return np.stack(rows) if rows else np.empty((0, EMBEDDING_DIM), np.float32)
+
+    def embed_query(self, text: str) -> np.ndarray:
+        self.calls.append([text])
+        return fake_vector(b"query:" + text.encode())
+
+
+class FakeImageEmbedder:
+    """Deterministic vectors: the same picture (or text) always gives the same vector."""
+
+    def __init__(self, model: str = "fake-image-embedder"):
+        self.model = model
+        self.images_embedded = 0
+
+    @property
+    def name(self) -> str:
+        return self.model
+
+    def embed_images(self, frames: list[np.ndarray]) -> np.ndarray:
+        self.images_embedded += len(frames)
+        rows = [fake_vector(np.ascontiguousarray(f).tobytes()) for f in frames]
+        return np.stack(rows) if rows else np.empty((0, EMBEDDING_DIM), np.float32)
+
+    def embed_text(self, text: str) -> np.ndarray:
+        return fake_vector(b"text:" + text.encode())
 
 
 class FakeRedis:
