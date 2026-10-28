@@ -50,7 +50,8 @@ export interface Segment {
   end_time: string;
   duration_ms: number;
   activity_score: number | null;
-  status: "pending" | "processing" | "done" | "failed";
+  /** The analysis state. */
+  status: ProcessingStatus;
   codec: string | null;
   width: number | null;
   height: number | null;

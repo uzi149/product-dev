@@ -11,8 +11,16 @@ import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { formatDateTime, formatDuration, localInputToIso } from "@/lib/format";
 import { LIST_POLL_MS } from "@/lib/refresh";
-import type { Camera } from "@/lib/types";
+import { segmentStatus } from "@/lib/segments";
+import type { Camera, ProcessingStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
+
+const STATUS_TONE: Record<ProcessingStatus, string> = {
+  pending: "text-muted-foreground",
+  processing: "border-blue/45 bg-blue/10 text-blue",
+  done: "border-green/45 bg-green/10 text-green",
+  failed: "border-red/45 bg-red/15 text-red",
+};
 
 export function SegmentsPanel({ camera }: { camera: Camera }) {
   const [from, setFrom] = useState("");
@@ -89,7 +97,13 @@ export function SegmentsPanel({ camera }: { camera: Camera }) {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Badge variant="outline">{segment.status}</Badge>
+                  <Badge
+                    variant="outline"
+                    title={segmentStatus(segment.status).hint}
+                    className={STATUS_TONE[segment.status]}
+                  >
+                    {segmentStatus(segment.status).label}
+                  </Badge>
                   {isPlaying ? (
                     <Button size="sm" variant="outline" onClick={() => setPlayingId(null)}>
                       <X /> Close
