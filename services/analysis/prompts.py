@@ -13,13 +13,16 @@ import json
 
 from shared.schemas.observation import ACTION_VOCABULARY
 
-PROMPT_VERSION = 1
-MAX_ANSWER_TOKENS = 800
+# 2: entities limited to what takes part (busy scenes listed every parked car and were cut off).
+PROMPT_VERSION = 2
+# A busy scene with 10 entities and 10 actions takes about 700 tokens; room for more.
+MAX_ANSWER_TOKENS = 1200
 
 SYSTEM_PROMPT = (
     "You analyse security camera footage. Report only what is visible. Do not guess "
     "identities, names, age, gender, ethnicity or intentions. If something is unclear or "
-    "hidden, say so in `uncertainties` instead of guessing. Answer with valid JSON only."
+    "hidden, say so in `uncertainties` instead of guessing. Keep the answer short: at most 10 "
+    "entities and 10 actions. Answer with valid JSON only."
 )
 
 EXAMPLE = {
@@ -46,8 +49,10 @@ EXAMPLE = {
 
 _FIELDS = """\
 - summary: 1-3 factual sentences about what happens in the clip as a whole.
-- entities: every person, vehicle, animal or object that takes part, each with a temporary_id
-  that is only valid in this clip ("person_1", "vehicle_1", "object_1") and a short type.
+- entities: the people, vehicles, animals and objects that do something or are acted on, at
+  most 10, each with a temporary_id that is only valid in this clip ("person_1", "vehicle_1",
+  "object_1") and a short type. Do not list parked cars or bystanders one by one: mention them
+  in the summary and visible_objects instead.
 - actions: what the entities do, in order. type must be one of the action words below;
   subject (and object, if any) are temporary_ids; start_second and end_second are seconds
   from the start of the clip. Leave out anything that is not one of the action words.
@@ -68,7 +73,8 @@ def describe_prompt(camera_name: str, frame_seconds: list[float], window_seconds
         f"Action words: {', '.join(ACTION_VOCABULARY)}.\n\n"
         f"Example:\n{json.dumps(EXAMPLE)}\n\n"
         "If nothing happens, give a summary of the scene and empty entities and actions. "
-        "Answer with the JSON object only."
+        "Keep the answer short: at most 10 entities and 10 actions, never one entry per parked "
+        "car. Answer with the JSON object only."
     )
 
 

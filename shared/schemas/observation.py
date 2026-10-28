@@ -120,15 +120,15 @@ def read_observation(data: Any, window_seconds: float) -> Observation:
         subject = _text(item.get("subject")) or None
         if subject and subject not in known:
             notes.append(f"action '{word}' names an unknown subject '{subject}'")
-        actions.append(
-            Action(
-                type=word,
-                subject=subject,
-                object=_text(item.get("object")) or None,
-                start_second=min(start, end),
-                end_second=max(start, end),
-            )
+        action = Action(
+            type=word,
+            subject=subject,
+            object=_text(item.get("object")) or None,
+            start_second=min(start, end),
+            end_second=max(start, end),
         )
+        if action not in actions:  # models sometimes repeat the same entry many times
+            actions.append(action)
 
     confidence = _number(data.get("overall_confidence"))
     if confidence is None:
