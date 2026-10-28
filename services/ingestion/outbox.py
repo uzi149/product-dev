@@ -19,6 +19,7 @@ import os
 import shutil
 import threading
 import time
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -136,10 +137,13 @@ class Uploader:
         outbox: Outbox,
         storage: StorageClient,
         session_factory: sessionmaker[Session] | type[Session],
+        on_segment_stored: Callable[[UUID], object] | None = None,
     ):
         self.outbox = outbox
         self.storage = storage
         self.session_factory = session_factory
+        # Called with the id of each newly stored segment: queues its analysis (step 3.3).
+        self.on_segment_stored = on_segment_stored
         self._waiting = False
 
     def run_once(self) -> bool:
@@ -242,7 +246,8 @@ class Uploader:
                 info.duration_s,
                 start.isoformat(timespec="seconds"),
             )
-            # Phase 3 (step 3.3) queues the VLM analysis of the new segment here.
+            if self.on_segment_stored is not None:
+                self.on_segment_stored(segment_id)
 
     def _store_static(self, item: Path, data: dict) -> None:
         period_id, camera_id = UUID(data["id"]), UUID(data["camera_id"])

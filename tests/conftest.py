@@ -13,6 +13,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from shared.config import Settings
+from shared.jobs import celery_app as jobs
 from shared.storage import StorageClient
 
 TEST_DB = "sentinel_test"
@@ -39,9 +40,20 @@ def pytest_collection_modifyitems(items):
                 "tests/ingestion/test_live_rtsp",
                 "tests/ingestion/test_outbox",
                 "tests/ingestion/test_supervisor",
+                "tests/analysis/test_analyze_segment",
+                "tests/analysis/test_queueing",
+                "tests/analysis/test_inspect",
             )
         ):
             item.add_marker(pytest.mark.integration)
+
+
+@pytest.fixture(autouse=True)
+def analysis_queue(monkeypatch) -> list:
+    """Segment ids queued for analysis. No test ever sends to the real Redis queue."""
+    queued: list = []
+    monkeypatch.setattr(jobs, "queue_analyze_segment", queued.append)
+    return queued
 
 
 def _admin_connect(settings: Settings) -> psycopg.Connection:
