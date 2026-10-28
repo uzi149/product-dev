@@ -28,7 +28,10 @@ def spans(duration: float) -> list[tuple[float, float]]:
     ],
 )
 def test_windows_of_a_segment(duration, expected):
-    assert spans(duration) == pytest.approx(expected)
+    # Flattened: newer pytest versions don't compare nested structures with approx.
+    flat = [t for span in spans(duration) for t in span]
+    assert flat == pytest.approx([t for span in expected for t in span])
+    assert len(spans(duration)) == len(expected)
 
 
 @pytest.mark.parametrize("duration", [1, 7.3, 12, 13.4, 20, 29.9, 30, 47, 61, 600.5])
