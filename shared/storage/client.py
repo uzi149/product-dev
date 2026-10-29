@@ -101,6 +101,18 @@ class StorageClient:
         except _ERRORS as error:
             raise _wrap(error) from error
 
+    def download_bytes(self, key: str) -> bytes:
+        """A small object's content (keyframes); raises NotFound when it doesn't exist."""
+        try:
+            response = self._client.get_object(self.bucket, key)
+            try:
+                return response.read()
+            finally:
+                response.close()
+                response.release_conn()
+        except _ERRORS as error:
+            raise _wrap(error) from error
+
     def exists(self, key: str) -> bool:
         try:
             self._client.stat_object(self.bucket, key)

@@ -20,6 +20,7 @@ EXPECTED_TABLES = {
     "query_results",
     "uploads",
     "index_settings",
+    "query_evidence",
 }
 
 
@@ -75,14 +76,14 @@ def test_indexes_from_scope_5_3_exist(engine):
 
 def test_uploads_migration_downgrades_on_its_own(migrated_db, alembic_config):
     command.downgrade(alembic_config, "0001")
-    assert _tables(migrated_db) == EXPECTED_TABLES - {"uploads", "index_settings"}
+    assert _tables(migrated_db) == EXPECTED_TABLES - {"uploads", "index_settings", "query_evidence"}
     command.upgrade(alembic_config, "head")
     assert "uploads" in _tables(migrated_db)
 
 
 def test_index_settings_migration_downgrades_on_its_own(migrated_db, alembic_config):
     command.downgrade(alembic_config, "0002")
-    assert _tables(migrated_db) == EXPECTED_TABLES - {"index_settings"}
+    assert _tables(migrated_db) == EXPECTED_TABLES - {"index_settings", "query_evidence"}
     command.upgrade(alembic_config, "head")
     assert "index_settings" in _tables(migrated_db)
 
@@ -118,3 +119,17 @@ def test_segment_status_changed_at_starts_at_created_at(migrated_db, alembic_con
         assert "status_changed_at" not in columns
     finally:
         engine.dispose()
+
+
+def test_query_progress_migration_downgrades_on_its_own(migrated_db, alembic_config):
+    command.downgrade(alembic_config, "0005")
+    assert _tables(migrated_db) == EXPECTED_TABLES - {"query_evidence"}
+    engine = create_engine(migrated_db)
+    try:
+        with engine.connect() as conn:
+            columns = {c["name"] for c in inspect(conn).get_columns("query_sessions")}
+        assert "status" not in columns and "query_text" in columns
+    finally:
+        engine.dispose()
+    command.upgrade(alembic_config, "head")
+    assert "query_evidence" in _tables(migrated_db)

@@ -47,6 +47,7 @@ def pytest_collection_modifyitems(items):
                 "tests/search/test_retrieval",
                 "tests/search/test_hybrid",
                 "tests/search/test_evidence",
+                "tests/query",
                 "tests/search/test_search_command",
             )
         ):

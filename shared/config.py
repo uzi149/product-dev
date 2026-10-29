@@ -141,6 +141,13 @@ class Settings(BaseSettings):
     query_merge_gap_seconds: float = Field(default=2.0, ge=0)
     query_group_gap_minutes: float = Field(default=10.0, ge=0)
 
+    # Verification (step 4.4, ADR 0029): the best results are checked by the VLM, one at a time,
+    # on up to QUERY_VERIFY_FRAMES of their stored keyframes; verified at this confidence or more.
+    # Skipped when the VLM is the local model.
+    query_verify_top: int = Field(default=5, ge=0)
+    query_verify_frames: int = Field(default=12, gt=0)
+    query_verify_min_confidence: float = Field(default=0.6, ge=0, le=1)
+
     # MVP plan §2
     keyframes_per_window: int = Field(default=6, gt=0)
     default_retention_days: int = Field(default=14, gt=0)

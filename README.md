@@ -96,8 +96,9 @@ docker compose up -d                                                     # if no
 
 uvicorn services.api.main:app --reload --host 127.0.0.1 --port 8000      # 1. API on :8000
 celery -A shared.jobs.celery_app worker --pool=solo -Q default,analysis  # 2. uploads + analysis
-python -m services.ingestion                                             # 3. live RTSP cameras (optional)
-cd frontend; npm run dev                                                 # 4. UI on :3000
+celery -A shared.jobs.celery_app worker --pool=solo -Q query -n query@%h  # 3. queries (Investigate)
+python -m services.ingestion                                             # 4. live RTSP cameras (optional)
+cd frontend; npm run dev                                                 # 5. UI on :3000
 ```
 
 Open **http://localhost:3000**. The API docs are at http://127.0.0.1:8000/docs.
@@ -239,6 +240,18 @@ uvicorn services.api.main:app --reload     # http://127.0.0.1:8000  (docs at /do
   `processing`, `done`, `failed`) with the number of parts stored or the error
 - `GET /segments`, `GET /segments/{id}`, `GET /segments/{id}/playback`
 - `GET /static-periods`, `GET /static-periods/{id}/reference-frame`
+- `POST /queries` (`query_text`, optional `camera_ids` / `start` / `end`, the browser's
+  `timezone`): reads the cameras and times out of the text at once (step 4.1), stores the query
+  and queues it for the query worker (`202`, with what it understood); `422` when only cameras
+  or times are left. The worker searches (4.2), merges the evidence (4.3) and, with an API VLM,
+  has the best 5 results checked by the VLM (`QUERY_VERIFY_TOP`): verified at confidence ≥ 0.6,
+  otherwise rejected; with the local model there is no verification (ADR 0029).
+- `GET /queries/{id}`: status, stage (`searching`, `candidates`, `verifying`, `done`) and counts;
+  `GET /queries/{id}/results`: the merged results, best first, each with its playback manifest
+  (video parts and gaps), verification and reason; rejected ones only with
+  `?include_rejected=true`. `WS /queries/{id}/progress` sends `{state, results}` at once and
+  after every change, and closes when the query is done.
+- `GET /keyframes/{id}/image`: `307` to a keyframe picture (result thumbnails)
 
 ## Run a worker
 
@@ -254,6 +267,16 @@ celery -A shared.jobs.celery_app worker --pool=solo -Q default,analysis
 processed as soon as one starts. A worker on `analysis` also loads the embedding models (about
 2 GB). To keep a long analysis backlog from holding up uploads, run two workers instead: one on
 `-Q default` and one on `-Q analysis`.
+
+Queries (step 4.4) run on their **own worker**, so a query never waits behind segments being
+analysed (ADR 0028):
+
+```bash
+celery -A shared.jobs.celery_app worker --pool=solo -Q query -n query@%h
+```
+
+It loads the embedding models on its first query (about 40 s, 2 GB) and keeps them for every
+later one. Without it, queries stay `pending`.
 
 Camera source URIs are encrypted with `FERNET_KEY` and never returned by the API. The key in
 `.env.example` is a **shared development key**: generate a private one
@@ -462,6 +485,20 @@ fusion, and the hybrid ranking must pass at least as many. With an API key the c
 go to OpenRouter (the VIRAT clips are public test footage). `ACCEPTANCE_KEEP=1` keeps the
 scratch database (`sentinel_acceptance`) and bucket afterwards, to look at the analysed windows
 or re-rank them without analysing again; the next run empties them.
+
+### Phase 4 acceptance
+
+The same VIRAT clips go through the whole query pipeline (ADR 0030):
+
+```bash
+RUN_MODEL_TESTS=1 pytest -m acceptance -s tests/acceptance/test_phase4.py
+```
+
+Every query whose expected interval spans more than one analysis window runs as a real query; a
+result among the top 3 must cover the whole interval, as one result. For the gap, the first clip
+is stored twice on one camera 5 minutes apart; its query must give one result with a part in
+each copy and a gap of at least 5 minutes between them. Verification runs with an API VLM and is
+reported, not judged. The report goes to `data/acceptance/phase4-<time>.md`.
 
 ## Embedding models
 

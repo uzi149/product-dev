@@ -65,6 +65,22 @@ class EventStatus(enum.StrEnum):
     DISMISSED = "dismissed"
 
 
+class QueryStatus(enum.StrEnum):
+    PENDING = "pending"
+    RUNNING = "running"
+    DONE = "done"
+    FAILED = "failed"
+
+
+class EvidenceStatus(enum.StrEnum):
+    """A query result: a possible match until the VLM verifies or rejects it (ADR 0029)."""
+
+    POSSIBLE = "possible"
+    VERIFIED = "verified"
+    REJECTED = "rejected"
+    UNVERIFIABLE = "unverifiable"  # the VLM couldn't be asked or gave no usable answer
+
+
 def _one_of(column: str, values: type[enum.StrEnum], name: str) -> CheckConstraint:
     allowed = ", ".join(f"'{v.value}'" for v in values)
     return CheckConstraint(f"{column} IN ({allowed})", name=name)
@@ -367,7 +383,11 @@ class EventEvidence(Base):
 
 
 class QuerySession(Base):
+    """One plain-English query and its progress (steps 4.1-4.4). `stage` is what the UI shows:
+    searching, candidates, verifying, done; `verification` is "on" or "skipped" (local VLM)."""
+
     __tablename__ = "query_sessions"
+    __table_args__ = (_one_of("status", QueryStatus, "status"),)
 
     id: Mapped[uuid.UUID] = _uuid_pk()
     query_text: Mapped[str] = mapped_column(Text)
@@ -375,10 +395,55 @@ class QuerySession(Base):
     start_filter: Mapped[datetime | None] = _timestamp(nullable=True)
     end_filter: Mapped[datetime | None] = _timestamp(nullable=True)
     created_at: Mapped[datetime] = _created_at()
+    status: Mapped[str] = mapped_column(String(20), server_default=QueryStatus.PENDING.value)
+    stage: Mapped[str | None] = mapped_column(String(20))
+    search_text: Mapped[str | None] = mapped_column(Text)
+    understood_json: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
+    timezone: Mapped[str | None] = mapped_column(String(64))
+    verification: Mapped[str | None] = mapped_column(String(10))
+    error: Mapped[str | None] = mapped_column(Text)
+    finished_at: Mapped[datetime | None] = _timestamp(nullable=True)
 
     results: Mapped[list["QueryResult"]] = relationship(
         back_populates="session", cascade="all, delete-orphan", passive_deletes=True
     )
+    evidence: Mapped[list["QueryEvidence"]] = relationship(
+        back_populates="session",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="QueryEvidence.rank",
+    )
+
+
+class QueryEvidence(Base):
+    """One merged result of a query (scope §11): its playback manifest and verification. The id
+    is the `sequence_group_id` of its windows in query_results."""
+
+    __tablename__ = "query_evidence"
+    __table_args__ = (
+        _one_of("status", EvidenceStatus, "status"),
+        Index("ix_query_evidence_query_session_id_rank", "query_session_id", "rank"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    query_session_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("query_sessions.id", ondelete="CASCADE")
+    )
+    rank: Mapped[int] = mapped_column(Integer)
+    camera_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("cameras.id", ondelete="CASCADE"))
+    start_time: Mapped[datetime] = _timestamp()
+    end_time: Mapped[datetime] = _timestamp()
+    score: Mapped[float] = mapped_column(Float)
+    status: Mapped[str] = mapped_column(String(20), server_default=EvidenceStatus.POSSIBLE.value)
+    verification_confidence: Mapped[float | None] = mapped_column(Float)
+    verification_reason: Mapped[str | None] = mapped_column(Text)
+    summary: Mapped[str | None] = mapped_column(Text)
+    keyframe_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("keyframes.id", ondelete="SET NULL")
+    )
+    manifest_json: Mapped[dict[str, Any]] = mapped_column(JSONB)
+
+    session: Mapped[QuerySession] = relationship(back_populates="evidence")
 
 
 class QueryResult(Base):

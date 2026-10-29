@@ -3,6 +3,7 @@ from uuid import UUID
 
 import redis
 
+from services.query_engine.progress import QueryEvents
 from shared.camera_status import get_redis as _get_redis
 from shared.database.session import get_session
 from shared.jobs import celery_app as jobs
@@ -24,6 +25,16 @@ def get_analysis_queue() -> Callable[[UUID], None]:
     return jobs.queue_analyze_segment
 
 
+def get_query_queue() -> Callable[[UUID], None]:
+    """Queues a query for the query worker (ADR 0028); tests replace it."""
+    return jobs.queue_run_query
+
+
+def get_query_events() -> QueryEvents:
+    """Progress notices of a query (Redis pub/sub); tests replace it."""
+    return QueryEvents()
+
+
 def get_redis() -> redis.Redis:
     """Live camera status (written by `python -m services.ingestion`); tests replace it."""
     return _get_redis()
@@ -31,6 +42,8 @@ def get_redis() -> redis.Redis:
 
 __all__ = [
     "get_analysis_queue",
+    "get_query_events",
+    "get_query_queue",
     "get_redis",
     "get_session",
     "get_storage_client",
