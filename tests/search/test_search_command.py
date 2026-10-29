@@ -101,3 +101,32 @@ def test_only_cameras_and_times_is_refused(windows, run):
 def test_an_unknown_time_zone_is_refused(run):
     with pytest.raises(SystemExit):
         run("doorbell", "--timezone", "Mars/Olympus")
+
+
+def test_evidence_results_list_their_video_parts(windows, run):
+    code, out, _ = run("doorbell", "--evidence", "--json")
+    assert code == 0
+    results = json.loads(out)
+    assert [r["camera_name"] for r in results] == ["Front door", "Yard"]
+    (part,) = results[0]["manifest"]["parts"]
+    assert part["type"] == "video" and (part["source_start_ms"], part["source_end_ms"]) == (
+        9_000,
+        21_000,
+    )
+    assert results[0]["windows"][0]["description"] == "A person rings the bell."
+
+
+def test_evidence_text_shows_what_to_play(windows, run):
+    _, out, _ = run("doorbell", "--evidence")
+    assert "1. Front door" in out and "play " in out and "9.0-21.0 s" in out
+    assert "* " in out  # the hit is marked
+
+
+def test_gap_wording():
+    assert [search._duration(ms) for ms in (312_000, 45_000, 0, 3_661_000, 60_000)] == [
+        "5 min 12 s",
+        "45 s",
+        "0 s",
+        "1 h 1 min 1 s",
+        "1 min",
+    ]

@@ -432,6 +432,19 @@ similarity with their rank in each index, keyword and action scores), the descri
 that opens the segment in the browser at that window (`#t=start,end`). `--camera` is not
 case-sensitive and can repeat; times without a zone are local.
 
+**Evidence results** (`--evidence`, step 4.3): the 10 best hits take their neighbouring window
+before and after (for context), windows at most 2 s apart merge into one clip, and clips on the
+same camera at most 10 minutes apart (`QUERY_GROUP_GAP_MINUTES`, ADR 0027) form one result.
+Each result lists the parts to play, segment by segment, and the gaps between them, which are
+never played as if continuous:
+
+```
+1. CAM-02  2026-03-07 14:20:51 - 14:27:29  best 0.903, 3 hit(s) of 5 window(s)
+   play 14:20:51-14:21:48: segment … 12.0-69.0 s
+   gap: 5 min 12 s not shown
+   play 14:27:00-14:27:29: segment … 0.0-29.0 s
+```
+
 ### Phase 3 acceptance
 
 Known videos with hand-checked ground truth (`test-data/acceptance/virat/*.yaml`, see its README
