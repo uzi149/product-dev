@@ -1,0 +1,25 @@
+# Ground truth for the Phase 3 acceptance (step 3.4). Drafted with tests/acceptance/virat_events.py
+# from VIRAT's event and object annotations, then checked by eye on frames every 4 s (2026-10-28).
+# A campus car park seen from above: a blue pickup drives in and parks, two people unload it and
+# carry the things across the car park.
+video: ../../virat/motion/VIRAT_S_040103_05_000729_000804.mp4
+start_time: '2026-03-07T09:00:00Z'
+fps: 29.97
+length_s: 74.8
+entities: [person, car]
+# VIRAT's wide views make some actions small and far away: accepted at 70 % (ADR 0023
+# amendment, 2026-10-28). Our own recorded clips keep the 80 % default.
+actions_needed: 0.7
+events:
+  # VIRAT "carrying": people walking along the path at the top, small in the picture.
+  - {action: carry_object, start_s: 0.0, end_s: 28.2, also: [walk]}
+  # From the vehicle track; by eye: enters at the right about 9 s, parked by 20 s.
+  - {action: vehicle_arrive, start_s: 8.0, end_s: 21.0, also: [vehicle_park]}
+  # VIRAT "unloading" 34.3-38.8 and 41.2-48.1, merged: both people at the back of the truck.
+  - {action: pick_up_object, start_s: 34.3, end_s: 48.1, also: [carry_object, place_object]}
+  # VIRAT "carrying": they carry the things across the car park, towards the bottom left.
+  - {action: carry_object, start_s: 50.9, end_s: 66.7, also: [walk, pick_up_object]}
+queries:
+  - {text: "a pickup truck drives into the parking lot and parks", start_s: 8, end_s: 22}
+  - {text: "people unload things from the back of a pickup truck", start_s: 32, end_s: 48}
+  - {text: "two people carry boxes across a parking lot", start_s: 50, end_s: 67}

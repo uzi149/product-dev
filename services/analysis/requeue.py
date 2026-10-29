@@ -11,7 +11,6 @@ It works even when ANALYSIS_ENABLED is false. A worker on the analysis queue doe
 """
 
 import argparse
-import re
 import sys
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
@@ -20,18 +19,8 @@ from sqlalchemy import select
 
 from shared.database.models import Camera, ProcessingStatus, VideoSegment
 from shared.database.session import get_sessionmaker
+from shared.durations import parse_age
 from shared.jobs import celery_app as jobs
-
-_AGE = re.compile(r"^(\d+(?:\.\d+)?)\s*([smhd])$")
-_UNITS = {"s": "seconds", "m": "minutes", "h": "hours", "d": "days"}
-
-
-def parse_age(text: str) -> timedelta:
-    """'90s', '30m', '2h', '1d' -> a timedelta."""
-    match = _AGE.match(text.strip().lower())
-    if match is None:
-        raise argparse.ArgumentTypeError(f"'{text}' is not an age like 30m, 2h or 1d")
-    return timedelta(**{_UNITS[match.group(2)]: float(match.group(1))})
 
 
 def find_segments(

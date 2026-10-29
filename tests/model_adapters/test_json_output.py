@@ -2,7 +2,7 @@
 
 import pytest
 
-from shared.model_adapters.json_output import extract_json
+from shared.model_adapters.json_output import close_truncated_json, extract_json
 
 
 @pytest.mark.parametrize(
@@ -35,3 +35,22 @@ def test_expect_skips_the_other_kind():
     assert extract_json(text) == [1, 2]
     assert extract_json(text, expect=dict) == {"summary": "x"}
     assert extract_json('{"a": 1}', expect=list) is None
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (
+            '{"summary": "s", "entities": [{"id": 1}, {"id": 2}, {"id"',
+            {"summary": "s", "entities": [{"id": 1}, {"id": 2}]},
+        ),
+        ('{"summary": "a, b", "list": [1, 2, 3', {"summary": "a, b", "list": [1, 2]}),
+        ('```json\n{"summary": "s", "x": {"y": [1, 2', {"summary": "s", "x": {"y": [1]}}),
+        ('{"summary": "say \\"hi\\", then", "a": [', {"summary": 'say "hi", then'}),
+        ('{"summary": "cut off before any comma', None),
+        ('{"complete": true}', None),  # nothing cut off: extract_json handles it
+        ("no json here", None),
+    ],
+)
+def test_a_cut_off_answer_is_closed_after_its_last_complete_entry(text, expected):
+    assert close_truncated_json(text) == expected

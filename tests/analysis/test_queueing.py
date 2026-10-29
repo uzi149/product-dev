@@ -11,6 +11,7 @@ from services.ingestion.outbox import Outbox, Uploader
 from services.ingestion.tasks import process_upload
 from shared.config import Settings
 from shared.database.models import Camera, Upload, VideoSegment
+from shared.durations import parse_age
 from shared.jobs import celery_app as jobs
 from shared.storage.keys import upload_key
 from tests.api.conftest import FFMPEG, make_video
@@ -155,12 +156,12 @@ def test_requeue_finds_segments_by_status_camera_and_age(session, segments):
     ],
 )
 def test_ages(text, age):
-    assert requeue.parse_age(text) == age
+    assert parse_age(text) == age
 
 
 def test_a_bad_age_is_refused():
     with pytest.raises(Exception, match="not an age"):
-        requeue.parse_age("yesterday")
+        parse_age("yesterday")
 
 
 def test_the_requeue_command_queues_even_when_analysis_is_off(

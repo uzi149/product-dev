@@ -43,6 +43,8 @@ def pytest_collection_modifyitems(items):
                 "tests/analysis/test_analyze_segment",
                 "tests/analysis/test_queueing",
                 "tests/analysis/test_inspect",
+                "tests/search/test_retrieval",
+                "tests/search/test_search_command",
             )
         ):
             item.add_marker(pytest.mark.integration)

@@ -114,6 +114,12 @@ def test_malformed_items_are_skipped():
         ("Summary: - Frame 1: a car. - Frame 2: a car parks. A car parks.", "A car parks."),
         ("A car parks in all frames.", "A car parks."),
         ("Frame 1 shows a car.", "Frame 1 shows a car."),  # nothing left: the original
+        (
+            "A person walks towards the lower left of the frame. The scene is quiet.",
+            "A person walks towards the lower left of the frame. The scene is quiet.",
+        ),
+        ("A car parks. In the last frame it is gone.", "A car parks."),
+        ("A van stops. Each frame shows rain.", "A van stops."),
     ],
 )
 def test_frame_by_frame_text_is_removed_from_the_summary(text, cleaned):
@@ -163,3 +169,47 @@ def test_two_bad_answers_are_invalid():
 def test_vlm_errors_pass_through():
     with pytest.raises(VLMUnavailable):
         describe(FakeVLM([VLMUnavailable("timeout")]))
+
+
+class CutOffVLM:
+    """Answers like a model that listed every parked car and hit the token limit, then well."""
+
+    name = "cut-off-vlm"
+
+    def __init__(self, head='{"summary": "A busy car park.", "entities": ['):
+        self.head = head
+        self.calls = []
+
+    def complete(self, frames, prompt, *, system=None, max_tokens=800):
+        from shared.model_adapters import VLMReply
+
+        self.calls.append(prompt)
+        if len(self.calls) == 1:
+            cars = ", ".join(f'{{"temporary_id": "vehicle_{n}", "type": "car"}}' for n in range(60))
+            text = self.head + cars + ', {"temporary_id": "vehi'
+            return VLMReply(text, self.name, 1, prompt_tokens=1965, completion_tokens=max_tokens)
+        return VLMReply(json.dumps(SCOPE_EXAMPLE), self.name, 1, 1965, 120)
+
+
+def test_a_cut_off_answer_keeps_what_is_complete():
+    vlm = CutOffVLM()
+    described = describe(vlm)
+    assert described.attempts == 1 and len(vlm.calls) == 1
+    observation = described.observation
+    assert observation.summary == "A busy car park."
+    assert len(observation.entities) == 60
+    assert "the answer was cut off after 1200 tokens" in observation.uncertainties[-1]
+
+
+def test_a_cut_off_answer_without_a_summary_is_asked_again_shorter():
+    vlm = CutOffVLM(head='{"entities": [')
+    described = describe(vlm)
+    assert described.attempts == 2
+    assert "too long and was cut off after 1200 tokens" in vlm.calls[1]
+    assert "at most 10 entities" in vlm.calls[1]
+
+
+def test_repeated_actions_are_kept_once():
+    action = {"type": "vehicle_arrive", "subject": "vehicle_1", "start_second": 3, "end_second": 5}
+    observation = read({"summary": "s", "actions": [action] * 9})
+    assert len(observation.actions) == 1

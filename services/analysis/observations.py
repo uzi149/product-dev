@@ -13,7 +13,7 @@ import numpy as np
 
 from services.analysis import prompts
 from shared.model_adapters import VisionLanguageModel, VLMReply
-from shared.model_adapters.json_output import extract_json
+from shared.model_adapters.json_output import close_truncated_json, extract_json
 from shared.schemas.observation import InvalidObservation, Observation, read_observation
 
 log = logging.getLogger(__name__)
@@ -25,7 +25,15 @@ _FRAME_PHRASE = re.compile(
     r"various\s+|these\s+)?(key)?frames\b",
     re.IGNORECASE,
 )
-_FRAME_WORD = re.compile(r"\b(key)?frames?\b", re.IGNORECASE)
+# Sentences about the frames one by one ("frame 3", "the last frame", "the frames", "keyframe").
+# Not "the frame" alone: "towards the left of the frame" means the picture's edge and is kept
+# (the reference code dropped every sentence with the word, losing good descriptions).
+_FRAME_WORD = re.compile(
+    r"\b(key)?frames\b|\bkeyframe\b|\bframe\s*#?\d+|"
+    r"\b(first|second|third|fourth|fifth|sixth|last|final|next|previous|later|earlier|each|every)"
+    r"\s+frame\b",
+    re.IGNORECASE,
+)
 _BULLET = re.compile(r"(?:^|\s)(?:[-•*]|\d+[.)])\s+")
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
@@ -53,12 +61,36 @@ def clean_summary(text: str) -> str:
     return " ".join(kept).strip() or text.strip()
 
 
-def _read(reply: VLMReply, window_seconds: float) -> Observation:
-    data = extract_json(reply.text, expect=dict)
-    if data is None:
-        raise InvalidObservation("no JSON object found")
-    observation = read_observation(data, window_seconds)
+def _read(reply: VLMReply, window_seconds: float, max_tokens: int) -> Observation:
+    try:
+        data = extract_json(reply.text, expect=dict)
+        if data is None:
+            raise InvalidObservation("no JSON object found")
+        observation = read_observation(data, window_seconds)
+    except InvalidObservation as error:
+        if reply.completion_tokens is None or reply.completion_tokens < max_tokens:
+            raise
+        # Cut off at the token limit: keep what is complete (the summary comes first), closed
+        # after the last complete entry. Only when nothing usable is left, ask again.
+        observation = _read_cut_off(reply.text, window_seconds, max_tokens)
+        if observation is None:
+            raise InvalidObservation(
+                f"the answer was too long and was cut off after {max_tokens} tokens; "
+                "list at most 10 entities and keep the answer short"
+            ) from error
     return observation.model_copy(update={"summary": clean_summary(observation.summary)})
+
+
+def _read_cut_off(text: str, window_seconds: float, max_tokens: int) -> Observation | None:
+    data = close_truncated_json(text)
+    if not isinstance(data, dict):
+        return None
+    try:
+        observation = read_observation(data, window_seconds)
+    except InvalidObservation:
+        return None
+    note = f"the answer was cut off after {max_tokens} tokens; later entries are missing"
+    return observation.model_copy(update={"uncertainties": [*observation.uncertainties, note]})
 
 
 def describe_window(
@@ -77,7 +109,9 @@ def describe_window(
             max_tokens=prompts.MAX_ANSWER_TOKENS,
         )
         try:
-            return Described(_read(reply, window_seconds), reply, attempt)
+            return Described(
+                _read(reply, window_seconds, prompts.MAX_ANSWER_TOKENS), reply, attempt
+            )
         except InvalidObservation as error:
             if attempt == 2:
                 raise InvalidObservation(

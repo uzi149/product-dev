@@ -1,0 +1,25 @@
+# Ground truth for the Phase 3 acceptance (step 3.4). Drafted with tests/acceptance/virat_events.py
+# from VIRAT's event and object annotations, then checked by eye on frames every 4 s (2026-10-28).
+# A city street seen from above with road works: workers in safety vests, traffic cones, parked
+# cars; a bus and a white box truck drive down the street at the end.
+video: ../../virat/motion/VIRAT_S_050000_11_001530_001576.mp4
+start_time: '2026-03-07T09:00:00Z'
+fps: 29.97
+length_s: 45.7
+entities: [person, car]
+# VIRAT's wide views make some actions small and far away: accepted at 70 % (ADR 0023
+# amendment, 2026-10-28). Our own recorded clips keep the 80 % default.
+actions_needed: 0.7
+events:
+  # VIRAT "carrying": a worker carries something along the road works (small in the picture).
+  - {action: carry_object, start_s: 10.0, end_s: 37.7, also: [walk]}
+  # By eye: a bus drives down the street from 30 s, a white box truck from 36 s.
+  - {action: vehicle_arrive, start_s: 30.0, end_s: 45.7, also: [vehicle_depart, vehicle_park]}
+  # VIRAT "getting out of a vehicle".
+  - {action: leave, start_s: 37.9, end_s: 42.4, also: [enter, walk, open_door]}
+  # VIRAT "carrying".
+  - {action: carry_object, start_s: 39.2, end_s: 45.6, also: [walk]}
+queries:
+  - {text: "a bus drives down the street", start_s: 30, end_s: 42}
+  - {text: "a white delivery truck on the road", start_s: 35, end_s: 46}
+  - {text: "construction workers in safety vests near traffic cones", start_s: 0, end_s: 30}

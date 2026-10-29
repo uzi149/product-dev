@@ -38,3 +38,8 @@ def test_the_retry_prompt_names_the_problem_and_repeats_the_rules():
 
 def test_the_prompt_has_a_version():
     assert isinstance(prompts.PROMPT_VERSION, int) and prompts.PROMPT_VERSION >= 1
+
+
+def test_entities_are_limited_to_what_takes_part():
+    text = " ".join(prompts.describe_prompt("Car park", TIMES, 12.0).split())
+    assert "at most 10" in text and "Do not list parked cars" in text

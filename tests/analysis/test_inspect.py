@@ -71,7 +71,7 @@ def test_the_windows_are_printed_in_order(analysed, run):
     assert prompts.EXAMPLE["summary"] in out
     assert "person_1 place_object object_1 (5.1-7.4 s)" in out
     assert "visible: person, bag" in out
-    assert "confidence 0.88, fake-vlm, prompt v1" in out
+    assert f"confidence 0.88, fake-vlm, prompt v{prompts.PROMPT_VERSION}" in out
     assert out.count("keyframe ") == 12 and "X-Amz-Signature" in out
 
 

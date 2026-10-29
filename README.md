@@ -301,6 +301,38 @@ its keyframes to OpenRouter, so test videos only). On start, an analysis worker 
 automatic analysis off (ADR 0022): new segments stay `pending` until requeued. The e2e stack runs
 with analysis off.
 
+## Search
+
+A plain-English query finds the analysed windows that show it (ADR 0023). The query is compared
+with the VLM descriptions (text index) and with the keyframes (visual index), inside the camera
+and time filters, and the two ranked lists are combined by rank (reciprocal rank fusion):
+
+```bash
+python -m services.query_engine.search "a person rings the doorbell"
+python -m services.query_engine.search "a car parks" --camera "Car park" --since 24h
+python -m services.query_engine.search "someone runs" --start 2026-10-28T09:00 --end 2026-10-28T10:00 --json
+```
+
+Each hit shows the camera, the window's time, the scores, the description and a `play:` link
+that opens the segment in the browser at that window (`#t=start,end`). Camera names are not
+case-sensitive and `--camera` can repeat; times without a zone are local. Parsing cameras and
+times out of the query itself comes in Phase 4.
+
+### Phase 3 acceptance
+
+Known videos with hand-checked ground truth (`test-data/acceptance/virat/*.yaml`, see its README
+for the clips) go through the real pipeline, in this process, on a scratch database and bucket
+of their own:
+
+```bash
+RUN_MODEL_TESTS=1 pytest -m acceptance -s tests/acceptance
+```
+
+It passes when every query finds its interval in the top 3 and enough of the actions are found
+(80 %, or a file's own `actions_needed`; a query marked `known_miss` is reported but doesn't
+fail), and writes a report to `data/acceptance/`. With an API key the clips' keyframes go to
+OpenRouter (the VIRAT clips are public test footage).
+
 ## Embedding models
 
 Search compares vectors (embeddings): one for each VLM description (the text index) and one for
