@@ -134,6 +134,13 @@ class Settings(BaseSettings):
     # Hits with a lower fused score are dropped, so a query about nothing stored finds nothing.
     query_min_score: float = Field(default=0.2, ge=0, le=1)
 
+    # Evidence results (step 4.3, scope §11): the best hits get their neighbouring windows, windows
+    # at most MERGE_GAP apart join into one sequence, and sequences on one camera at most
+    # GROUP_GAP apart form one result with explicit gaps (ADR 0027).
+    query_expand_top: int = Field(default=10, gt=0)
+    query_merge_gap_seconds: float = Field(default=2.0, ge=0)
+    query_group_gap_minutes: float = Field(default=10.0, ge=0)
+
     # MVP plan §2
     keyframes_per_window: int = Field(default=6, gt=0)
     default_retention_days: int = Field(default=14, gt=0)

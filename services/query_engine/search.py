@@ -6,13 +6,16 @@
     python -m services.query_engine.search "someone runs" --start 2026-10-28T09:00 --end 2026-10-28T10:00
     python -m services.query_engine.search "a red car yesterday" --limit 5 --json
     python -m services.query_engine.search "a car parks" --ranking rrf
+    python -m services.query_engine.search "a car parks" --evidence
 
 Camera names and time phrases in the query become filters (step 4.1; "yesterday" in this
 machine's time zone, or --timezone); --camera, --since, --start and --end win over them, and
 --no-parse searches the text as it is. Hits are ranked by the hybrid score of step 4.2
 (--ranking rrf: step 3.4's rank fusion). Each hit shows the camera, the window's time, the
 scores, what the VLM wrote, and a link that plays exactly that window (it opens in the browser
-for an hour). Times without a zone are local.
+for an hour). Times without a zone are local. --evidence prints merged evidence results instead
+(step 4.3): the best hits with their neighbouring windows, merged by time, with the video parts
+to play and the gaps between them.
 """
 
 import argparse
@@ -24,8 +27,10 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from services.query_engine.evidence import EvidenceResult, evidence_results
 from services.query_engine.filters import CameraRef, ParsedQuery, apply_explicit, parse_query
 from services.query_engine.retrieval import WindowHit, search
+from shared.config import get_settings
 from shared.database.index_settings import IndexSettingsMismatch
 from shared.database.models import Camera, VideoSegment
 from shared.database.session import get_sessionmaker
@@ -111,6 +116,66 @@ def render(hits: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _duration(ms: int) -> str:
+    """312000 -> '5 min 12 s'."""
+    minutes, seconds = divmod(round(ms / 1000), 60)
+    hours, minutes = divmod(minutes, 60)
+    words = [f"{hours} h"] if hours else []
+    if minutes:
+        words.append(f"{minutes} min")
+    if seconds or not words:
+        words.append(f"{seconds} s")
+    return " ".join(words)
+
+
+def evidence_json(result: EvidenceResult, names: dict) -> dict:
+    return {
+        "result_id": str(result.id),
+        "camera_name": names.get(result.camera_id, ""),
+        "score": result.score,
+        "manifest": result.manifest.model_dump(mode="json"),
+        "windows": [
+            {
+                "start_time": w.start.isoformat(),
+                "end_time": w.end.isoformat(),
+                "description": w.description,
+                "score": w.score,
+            }
+            for w in result.windows
+        ],
+    }
+
+
+def render_evidence(results: list[dict]) -> str:
+    if not results:
+        return "no matching windows (is the footage analysed? see services.analysis.inspect)"
+    lines = []
+    for rank, r in enumerate(results, 1):
+        m = r["manifest"]
+        start, end = datetime.fromisoformat(m["start_time"]), datetime.fromisoformat(m["end_time"])
+        hits = sum(w["score"] is not None for w in r["windows"])
+        lines.append(
+            f"{rank}. {r['camera_name']}  {_local(start)} - {_local(end)[11:]}  "
+            f"best {r['score']:.3f}, {hits} hit(s) of {len(r['windows'])} window(s)"
+        )
+        for part in m["parts"]:
+            if part["type"] == "gap":
+                lines.append(f"   gap: {_duration(part['duration_ms'])} not shown")
+            else:
+                a = _local(datetime.fromisoformat(part["start_time"]))[11:]
+                b = _local(datetime.fromisoformat(part["end_time"]))[11:]
+                lines.append(
+                    f"   play {a}-{b}: segment {part['segment_id']} "
+                    f"{part['source_start_ms'] / 1000:.1f}-{part['source_end_ms'] / 1000:.1f} s"
+                )
+        for w in r["windows"]:
+            mark = "*" if w["score"] is not None else " "
+            when = _local(datetime.fromisoformat(w["start_time"]))[11:]
+            lines.append(f"   {mark} {when} {w['description']}")
+        lines.append("")
+    return "\n".join(lines)
+
+
 def _time(text: str) -> datetime:
     value = datetime.fromisoformat(text)
     return value if value.tzinfo else value.astimezone()  # no zone: local time
@@ -139,6 +204,9 @@ def main(argv: list[str] | None = None) -> int:
         help="hybrid score (default) or step 3.4's rank fusion, for comparison",
     )
     parser.add_argument("--json", action="store_true", help="print JSON instead of text")
+    parser.add_argument(
+        "--evidence", action="store_true", help="merged evidence results with their video parts"
+    )
     parser.add_argument("--timezone", type=_zone, help="for time phrases, e.g. Asia/Karachi")
     parser.add_argument(
         "--no-parse", action="store_true", help="don't read camera names and times from the query"
@@ -171,12 +239,20 @@ def main(argv: list[str] | None = None) -> int:
                 camera_ids=parsed.camera_ids or None,
                 start=parsed.start,
                 end=parsed.end,
-                limit=args.limit,
+                limit=max(args.limit, get_settings().query_expand_top)
+                if args.evidence
+                else args.limit,
                 ranking=args.ranking,
             )
         except (LookupError, IndexSettingsMismatch) as error:
             print(error, file=sys.stderr)
             return 2
+        if args.evidence:
+            names = {c.id: c.name for c in all_cameras(session)}
+            found = evidence_results(session, hits)[: args.limit]
+            results = [evidence_json(r, names) for r in found]
+            print(json.dumps(results, indent=2) if args.json else render_evidence(results))
+            return 0
         results = [
             {**hit.to_json(), "playback_url": playback_url(session, storage, hit)} for hit in hits
         ]
