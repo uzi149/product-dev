@@ -206,6 +206,20 @@ class Uploader:
         self.outbox.done(item)
         return True
 
+    def _commit(self, session, camera_id: UUID, key: str | None) -> None:
+        """Commit the new row. If the camera was deleted meanwhile (step 3.6), the file just put
+        in storage for it is removed before the IntegrityError goes on."""
+        try:
+            session.commit()
+        except IntegrityError:
+            session.rollback()
+            if key is not None and session.get(Camera, camera_id) is None:
+                try:
+                    self.storage.delete(key)
+                except StorageError:
+                    log.warning("could not delete %s of deleted camera %s", key, camera_id)
+            raise
+
     def _store_segment(self, item: Path, data: dict) -> None:
         segment_id, camera_id = UUID(data["id"]), UUID(data["camera_id"])
         with self.session_factory() as session:
@@ -239,7 +253,7 @@ class Uploader:
                     height=info.height,
                 )
             )
-            session.commit()
+            self._commit(session, camera_id, key)
             log.info(
                 "camera %s: stored a %.1f s segment starting %s",
                 camera_id,
@@ -257,7 +271,7 @@ class Uploader:
             if session.get(Camera, camera_id) is None:
                 log.warning("camera %s no longer exists; its static period is dropped", camera_id)
                 return
-            uri = None
+            uri = key = None
             if data.get("reference_frame"):
                 key = static_frame_key(camera_id, period_id)
                 uri = self.storage.upload_file(
@@ -273,4 +287,4 @@ class Uploader:
                     health_status=data["health_status"],
                 )
             )
-            session.commit()
+            self._commit(session, camera_id, key if uri else None)

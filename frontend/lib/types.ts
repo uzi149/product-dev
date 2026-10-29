@@ -41,6 +41,15 @@ export interface CameraInput {
 
 export type CameraUpdate = Partial<Omit<CameraInput, "source_type">>;
 
+/** What deleting a camera removes; `blocker` says why it can't be deleted now (ADR 0026). */
+export interface DeletePreview {
+  segments: number;
+  static_periods: number;
+  analysed_windows: number;
+  uploads: number;
+  blocker: string | null;
+}
+
 export type ProcessingStatus = "pending" | "processing" | "done" | "failed";
 
 export interface Segment {

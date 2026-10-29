@@ -108,3 +108,15 @@ class ConnectionTestResult(BaseModel):
     width: int | None = None
     height: int | None = None
     error: str | None = None
+
+
+class DeletePreview(BaseModel):
+    """What deleting a camera removes, and why it can't be deleted now (`blocker`), if so."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    segments: int
+    static_periods: int
+    analysed_windows: int
+    uploads: int
+    blocker: str | None

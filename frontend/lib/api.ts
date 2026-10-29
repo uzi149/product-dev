@@ -3,6 +3,7 @@ import type {
   CameraInput,
   CameraUpdate,
   ConnectionTestResult,
+  DeletePreview,
   Health,
   Segment,
   StaticPeriod,
@@ -42,6 +43,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw new ApiError(detail, response.status);
   }
+  if (response.status === 204) return null as T;
   return (await response.json()) as T;
 }
 
@@ -64,6 +66,9 @@ export const api = {
   createCamera: (input: CameraInput) => request<Camera>("/cameras", json("POST", input)),
   updateCamera: (id: string, input: CameraUpdate) =>
     request<Camera>(`/cameras/${id}`, json("PATCH", input)),
+  deletePreview: (id: string) => request<DeletePreview>(`/cameras/${id}/delete-preview`),
+  /** Deletes the camera with all its footage, analysis and uploads, for good (HTTP 204). */
+  deleteCamera: (id: string) => request<null>(`/cameras/${id}`, { method: "DELETE" }),
   testConnection: (id: string) =>
     request<ConnectionTestResult>(`/cameras/${id}/test-connection`, { method: "POST" }),
   segments: (params: { cameraId: string; start?: string; end?: string; limit?: number }) => {
