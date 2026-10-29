@@ -3,9 +3,10 @@
 Run a worker on Windows with:
 
     celery -A shared.jobs.celery_app worker --pool=solo -Q default,analysis
+    celery -A shared.jobs.celery_app worker --pool=solo -Q query      # queries (ADR 0028)
 
 A second worker on `-Q analysis` alone can run next to it, so a long analysis backlog never
-holds up an upload.
+holds up an upload; queries have their own worker for the same reason.
 
 The API queues tasks by name, so it never imports worker code.
 """
@@ -27,17 +28,19 @@ QUERY_QUEUE = "query"
 # Task names: the API sends these, the worker modules register them.
 INGEST_UPLOAD = "ingestion.ingest_upload"
 ANALYZE_SEGMENT = "analysis.analyze_segment"
+RUN_QUERY = "query.run_query"
 
 celery_app = Celery(
     "sentinel",
     broker=get_settings().redis_url,
-    include=["services.ingestion.tasks", "services.analysis.tasks"],
+    include=["services.ingestion.tasks", "services.analysis.tasks", "services.query_engine.run"],
 )
 celery_app.conf.update(
     task_default_queue=DEFAULT_QUEUE,
     task_routes={
         INGEST_UPLOAD: {"queue": DEFAULT_QUEUE},
         ANALYZE_SEGMENT: {"queue": ANALYSIS_QUEUE},
+        RUN_QUERY: {"queue": QUERY_QUEUE},
     },
     task_serializer="json",
     accept_content=["json"],
@@ -52,6 +55,11 @@ celery_app.conf.update(
     task_publish_retry_policy={"max_retries": 2, "interval_start": 0, "interval_step": 0.5},
     broker_connection_retry_on_startup=True,
 )
+
+
+def queue_run_query(query_id: UUID) -> None:
+    """Raises when the broker (Redis) can't be reached."""
+    celery_app.send_task(RUN_QUERY, args=[str(query_id)])
 
 
 def queue_ingest_upload(upload_id: UUID) -> None:

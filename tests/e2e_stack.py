@@ -4,9 +4,9 @@
 
 It has its own PostgreSQL database (sentinel_e2e), MinIO bucket (sentinel-e2e), Redis database
 (1: job queue, camera status, ingestion heartbeat) and ingestion folder (data/e2e), all emptied at
-every start. It runs a Celery worker, live ingestion and the API on 127.0.0.1:8100, and stops them
-when it is stopped. Only the Docker services and the simulated cameras are shared (read-only).
-Logs: data/e2e/logs/.
+every start. It runs a Celery worker, a query worker (ADR 0028), live ingestion and the API on
+127.0.0.1:8100, and stops them when it is stopped. Only the Docker services and the simulated
+cameras are shared (read-only). Logs: data/e2e/logs/.
 """
 
 import os
@@ -139,11 +139,22 @@ def main() -> None:
             env,
             logs,
         )  # fmt: skip
+        # Queries: the embedding models load only when a query runs.
+        processes["query-worker"] = start(
+            "query-worker",
+            ["-m", "celery", "-A", "shared.jobs.celery_app", "worker", "--pool=solo",
+             "-Q", "query", "--loglevel=info", "-n", "query@%h"],
+            env,
+            logs,
+        )  # fmt: skip
         processes["ingestion"] = start("ingestion", ["-m", "services.ingestion"], env, logs)
         # The API comes last: once it answers, the tests can rely on the worker and ingestion.
-        wait_until(
-            lambda: b" ready." in (logs / "worker.log").read_bytes(), "the worker", processes
-        )
+        for name in ("worker", "query-worker"):
+            wait_until(
+                lambda name=name: b" ready." in (logs / f"{name}.log").read_bytes(),
+                f"the {name}",
+                processes,
+            )
         wait_until(lambda: client.exists(HEARTBEAT_KEY), "live ingestion", processes)
         processes["api"] = start(
             "api",
