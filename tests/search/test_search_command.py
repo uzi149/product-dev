@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from services.query_engine import retrieval, search
-from tests.search.conftest import IMAGE, Q_TEXT, TEXT, near
+from tests.search.conftest import IMAGE, OPEN, Q_TEXT, TEXT, near
 
 
 @pytest.fixture
@@ -15,6 +15,7 @@ def run(monkeypatch, engine, storage, capsys):
     monkeypatch.setattr(search, "get_storage", lambda: storage)
     monkeypatch.setattr(retrieval, "get_text_embedder", lambda: TEXT)
     monkeypatch.setattr(retrieval, "get_image_embedder", lambda: IMAGE)
+    monkeypatch.setattr(retrieval, "get_settings", lambda: OPEN)
 
     def run_search(*args):
         code = search.main(list(args))

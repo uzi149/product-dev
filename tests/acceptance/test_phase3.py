@@ -9,11 +9,14 @@ configured VLM and the real embedders, then check
 - the entities: listed when missing, not a failure (a VLM may call a bag a backpack);
 - the actions: found when a window has the same action (or an `also` word) overlapping its time
   within 2 s; at least 80 % of all actions must be found;
-- the queries: a window overlapping the expected interval must be in the top 3.
+- the queries: a window overlapping the expected interval must be in the top 3, with the
+  hybrid ranking (step 4.2); step 3.4's rank fusion runs too, and the hybrid ranking must pass
+  at least as many queries.
 
 Everything runs in this process on its own database and bucket. A report goes to
 data/acceptance/phase3-<time>.md. With an OpenRouter key the clips' keyframes are sent to
-OpenRouter: test videos only.
+OpenRouter: test videos only. ACCEPTANCE_KEEP=1 keeps the database and bucket afterwards, to
+look at or re-rank the analysed windows without analysing again.
 """
 
 from dataclasses import dataclass, field
@@ -45,6 +48,8 @@ class VideoResult:
     events: list[tuple[gt.Event, bool]] = field(default_factory=list)
     missing_entities: list[str] = field(default_factory=list)
     queries: list[tuple[gt.Query, bool, list]] = field(default_factory=list)
+    # The same queries ranked by step 3.4's reciprocal rank fusion, for comparison.
+    rrf_queries: list[tuple[gt.Query, bool]] = field(default_factory=list)
 
 
 def _seconds(value: datetime, start: datetime) -> float:
@@ -97,14 +102,25 @@ def run_video(truth, session_factory, storage, settings, models) -> VideoResult:
         result.events = [(e, gt.action_found(e, result.found_actions)) for e in truth.events]
         result.missing_entities = gt.missing_entities(truth.entities, names)
         for query in truth.queries:
-            hits = search(
-                session,
-                query.text,
-                camera_ids=[camera_id],
-                limit=gt.TOP,
-                text_embedder=models.text,
-                image_embedder=models.image,
-            )
+
+            def ranked(ranking: str, text: str = query.text):
+                return search(
+                    session,
+                    text,
+                    camera_ids=[camera_id],
+                    limit=gt.TOP,
+                    ranking=ranking,
+                    settings=settings,
+                    text_embedder=models.text,
+                    image_embedder=models.image,
+                )
+
+            hits = ranked("hybrid")
+            rrf = [
+                (_seconds(h.start_time, truth.start_time), _seconds(h.end_time, truth.start_time))
+                for h in ranked("rrf")
+            ]
+            result.rrf_queries.append((query, gt.query_passes(query, rrf)))
             spans = [
                 (
                     _seconds(h.start_time, truth.start_time),
@@ -128,13 +144,17 @@ def report(results: list[VideoResult], models) -> Path:
     found = sum(ok for r in results for _, ok in r.events)
     total = sum(len(r.events) for r in results)
     queries_ok = sum(ok for r in results for _, ok, _ in r.queries)
+    rrf_ok = sum(ok for r in results for _, ok in r.rrf_queries)
     queries = sum(len(r.queries) for r in results)
     lines = [
         f"# Phase 3 acceptance, {datetime.now():%Y-%m-%d %H:%M}",
         "",
         f"VLM {models.vlm.name}; embeddings {models.text.name} + {models.image.name}.",
         "",
-        f"- Queries in the top {gt.TOP}: **{queries_ok}/{queries}**",
+        (
+            f"- Queries in the top {gt.TOP}: **{queries_ok}/{queries}** with the hybrid ranking "
+            f"({rrf_ok}/{queries} with rank fusion)"
+        ),
         f"- Actions found: **{found}/{total}** ({found / max(total, 1):.0%})",
         *(
             f"  - clips needing {bar:.0%}: {share:.0%} found"
@@ -152,15 +172,17 @@ def report(results: list[VideoResult], models) -> Path:
             for e, ok in r.events
         ]
         lines += ["", "Queries:", ""]
-        for query, ok, spans in r.queries:
+        for (query, ok, spans), (_, rrf_ok) in zip(r.queries, r.rrf_queries, strict=True):
             lines.append(
                 f'- {_verdict(query, ok)} "{query.text}" '
-                f"(expected {query.start_s:.0f}-{query.end_s:.0f} s)"
+                f"(expected {query.start_s:.0f}-{query.end_s:.0f} s; rank fusion "
+                f"{'pass' if rrf_ok else 'miss'})"
             )
             for rank, (s, e, hit) in enumerate(spans, 1):
                 lines.append(
-                    f"  {rank}. {s:.0f}-{e:.0f} s, fused {hit.fused_score:.4f} "
-                    f"(text {hit.text_score or 0:.3f}, visual {hit.visual_score or 0:.3f}): "
+                    f"  {rank}. {s:.0f}-{e:.0f} s, fused {hit.fused_score:.3f} "
+                    f"(text {hit.text_score or 0:.3f}, visual {hit.visual_score or 0:.3f}, "
+                    f"keyword {hit.keyword_score or 0:.3f}, action {hit.action_score or 0:.2f}): "
                     f"{hit.description}"
                 )
         lines += ["", "Windows:", ""]
@@ -198,6 +220,12 @@ def results(acceptance_db, acceptance_storage, acceptance_settings):
 def test_every_query_finds_its_interval_in_the_top_3(results):
     failed = [q.text for r in results for q, ok, _ in r.queries if not ok and not q.known_miss]
     assert not failed, f"queries without a top-{gt.TOP} hit: {failed}"
+
+
+def test_the_hybrid_ranking_does_at_least_as_well_as_rank_fusion(results):
+    hybrid = sum(ok for r in results for _, ok, _ in r.queries)
+    rrf = sum(ok for r in results for _, ok in r.rrf_queries)
+    assert hybrid >= rrf, f"hybrid ranking {hybrid} queries, rank fusion {rrf}"
     found_now = [q.text for r in results for q, ok, _ in r.queries if ok and q.known_miss]
     if found_now:
         print(f"\nknown misses that were found this time (drop `known_miss`?): {found_now}")

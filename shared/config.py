@@ -115,12 +115,35 @@ class Settings(BaseSettings):
     # (its worker stopped); step 3.5, ADR 0024.
     analysis_stuck_minutes: int = Field(default=15, gt=0)
 
+    # Hybrid search (step 4.2): candidates from each index and from full-text search, then a
+    # weighted sum of signals mapped to 0-1. The weights are normalised over the signals that
+    # apply to a query (no actions in the query: no action signal; no events: no event signal).
+    query_candidates: int = Field(default=50, gt=0)
+    query_keyword_candidates: int = Field(default=20, ge=0)
+    query_weight_text: float = Field(default=0.45, ge=0)
+    query_weight_visual: float = Field(default=0.25, ge=0)
+    query_weight_keyword: float = Field(default=0.15, ge=0)
+    query_weight_action: float = Field(default=0.15, ge=0)
+    query_weight_event: float = Field(default=0.10, ge=0)
+    # Similarities at or below LOW count as 0, at or above HIGH as 1 (from the acceptance runs:
+    # bge gives matches about 0.62-0.72, SigLIP's text-to-picture scores are much lower).
+    query_text_low: float = 0.45
+    query_text_high: float = 0.75
+    query_visual_low: float = 0.02
+    query_visual_high: float = 0.16
+    # Hits with a lower fused score are dropped, so a query about nothing stored finds nothing.
+    query_min_score: float = Field(default=0.2, ge=0, le=1)
+
     # MVP plan §2
     keyframes_per_window: int = Field(default=6, gt=0)
     default_retention_days: int = Field(default=14, gt=0)
 
     @model_validator(mode="after")
     def _check_windows(self) -> "Settings":
+        if self.query_text_low >= self.query_text_high:
+            raise ValueError("query_text_low must be smaller than query_text_high")
+        if self.query_visual_low >= self.query_visual_high:
+            raise ValueError("query_visual_low must be smaller than query_visual_high")
         if self.window_overlap_seconds >= self.analysis_window_seconds:
             raise ValueError("window_overlap_seconds must be smaller than analysis_window_seconds")
         if self.pre_roll_seconds > self.rolling_buffer_seconds:

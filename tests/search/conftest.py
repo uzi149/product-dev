@@ -7,6 +7,7 @@ from uuid import uuid4
 import numpy as np
 import pytest
 
+from shared.config import Settings
 from shared.database.models import AnalysisWindow, Camera, Keyframe, TextEmbedding, VideoSegment
 from tests.fakes import fake_vector
 
@@ -43,6 +44,16 @@ class QueryEmbedder:
 
 
 TEXT = QueryEmbedder("fake-text-embedder", Q_TEXT)
+# Hand-made vectors don't have the real models' similarity ranges: map the whole -1..1 range
+# to 0..1 and keep every hit, so these tests check candidates and filters, not calibration.
+OPEN = Settings(
+    _env_file=None,
+    query_text_low=-1,
+    query_text_high=1,
+    query_visual_low=-1,
+    query_visual_high=1,
+    query_min_score=0,
+)
 IMAGE = QueryEmbedder("fake-image-embedder", Q_PICTURE)
 
 
@@ -66,6 +77,7 @@ def add_window(session):
         picture_vectors=(),
         status="done",
         description="something happens",
+        actions=("walk",),
     ):
         segment = segments.get(camera.id)
         if segment is None:
@@ -87,7 +99,9 @@ def add_window(session):
             start_time=START + timedelta(seconds=offset_s),
             end_time=START + timedelta(seconds=offset_s + 12),
             vlm_description=description,
-            structured_observation_json={"actions": [{"type": "walk", "subject": "person_1"}]},
+            structured_observation_json={
+                "actions": [{"type": t, "subject": "person_1"} for t in actions]
+            },
             processing_status=status,
         )
         session.add(window)

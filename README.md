@@ -94,7 +94,7 @@ Start Docker, then one terminal per process, each with the venv activated
 ```bash
 docker compose up -d                                                     # if not running
 
-uvicorn services.api.main:app --reload                                   # 1. API on :8000
+uvicorn services.api.main:app --reload --host 127.0.0.1 --port 8000      # 1. API on :8000
 celery -A shared.jobs.celery_app worker --pool=solo -Q default,analysis  # 2. uploads + analysis
 python -m services.ingestion                                             # 3. live RTSP cameras (optional)
 cd frontend; npm run dev                                                 # 4. UI on :3000
@@ -386,9 +386,25 @@ with analysis off.
 
 ## Search
 
-A plain-English query finds the analysed windows that show it (ADR 0023). The query is compared
-with the VLM descriptions (text index) and with the keyframes (visual index), inside the camera
-and time filters, and the two ranked lists are combined by rank (reciprocal rank fusion):
+A plain-English query finds the analysed windows that show it (ADR 0023). Inside the camera and
+time filters, the candidates are the 50 nearest VLM descriptions (text index), the 50 nearest
+windows by their best keyframe (visual index) and the 20 best full-text matches of the
+descriptions. Each candidate is scored on five signals and ranked by their weighted sum
+(step 4.2):
+
+| Signal | What it measures |
+|---|---|
+| text | how close the query is to the window's description (bge) |
+| visual | how close the query is to the window's best keyframe (SigLIP 2) |
+| keyword | the query's words in the description (PostgreSQL full-text search) |
+| action | the actions the query names ("parks" → `vehicle_park`) found in the window |
+| event | the confidence of an event covering the window (from Phase 5) |
+
+The weights (`QUERY_WEIGHT_*`), the similarity ranges that count as 0 and 1 (`QUERY_TEXT_LOW`,
+`_HIGH`, `QUERY_VISUAL_LOW`, `_HIGH`) and the minimum score of a hit (`QUERY_MIN_SCORE`) are
+settings; a signal that doesn't apply to a query (no action named, no events) is left out of the
+sum. A query about something that isn't in the footage finds nothing. `--ranking rrf` ranks
+by step 3.4's reciprocal rank fusion of the two vector lists instead, for comparison.
 
 ```bash
 python -m services.query_engine.search "a person rings the doorbell"
@@ -411,7 +427,8 @@ for: someone left a bag`):
 - They're read in this machine's time zone (`--timezone Asia/Karachi` to choose). `--camera`,
   `--since`, `--start` and `--end` win over the query; `--no-parse` searches the text as it is.
 
-Each hit shows the camera, the window's time, the scores, the description and a `play:` link
+Each hit shows the camera, the window's time, the fused score and its parts (text and visual
+similarity with their rank in each index, keyword and action scores), the description and a `play:` link
 that opens the segment in the browser at that window (`#t=start,end`). `--camera` is not
 case-sensitive and can repeat; times without a zone are local.
 
@@ -427,8 +444,11 @@ RUN_MODEL_TESTS=1 pytest -m acceptance -s tests/acceptance
 
 It passes when every query finds its interval in the top 3 and enough of the actions are found
 (80 %, or a file's own `actions_needed`; a query marked `known_miss` is reported but doesn't
-fail), and writes a report to `data/acceptance/`. With an API key the clips' keyframes go to
-OpenRouter (the VIRAT clips are public test footage).
+fail), and writes a report to `data/acceptance/`. The queries also run with `--ranking rrf`'s rank
+fusion, and the hybrid ranking must pass at least as many. With an API key the clips' keyframes
+go to OpenRouter (the VIRAT clips are public test footage). `ACCEPTANCE_KEEP=1` keeps the
+scratch database (`sentinel_acceptance`) and bucket afterwards, to look at the analysed windows
+or re-rank them without analysing again; the next run empties them.
 
 ## Embedding models
 
