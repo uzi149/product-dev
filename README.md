@@ -53,6 +53,75 @@ tests/              ingestion, search, triggers, end_to_end
 docs/               requirements and ADRs (docs/ADRs/)
 ```
 
+## Start the app locally
+
+A quick path from a fresh clone to a working app. The sections below explain each part.
+Commands are for Windows (PowerShell); on Linux / macOS use `cp` instead of `copy` and
+`source .venv/bin/activate` to activate the venv.
+
+**You need:** Python 3.12, Node 24, Docker Desktop, and FFmpeg on `PATH`
+(`winget install Gyan.FFmpeg`, then open a new terminal).
+
+### Once
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate
+pip install -e ".[dev]"                          # see "Getting started" for the CPU torch on Linux
+
+copy .env.example .env                           # optional: set VLM_API_KEY (see below)
+docker compose up -d                             # PostgreSQL, MinIO, Redis, MediaMTX
+alembic upgrade head                             # create the tables
+python -m shared.model_adapters.download_models  # embedding models, about 2 GB (else on first use)
+
+cd frontend
+copy .env.local.example .env.local
+npm install
+cd ..
+```
+
+**VLM:** with `VLM_API_KEY` (an OpenRouter key) set in `.env`, stored footage is analysed
+through OpenRouter in seconds per window, so use **test videos only**. Without a key, the local
+model runs on the CPU at about 5–6 min per window. `ANALYSIS_ENABLED=false` turns analysis off;
+footage is still stored and can be analysed later. See
+[Vision-language model](#vision-language-model-vlm).
+
+### Every time
+
+Start Docker, then one terminal per process, each with the venv activated
+(`.venv\Scripts\activate`) in the project folder:
+
+```bash
+docker compose up -d                                                     # if not running
+
+uvicorn services.api.main:app --reload                                   # 1. API on :8000
+celery -A shared.jobs.celery_app worker --pool=solo -Q default,analysis  # 2. uploads + analysis
+python -m services.ingestion                                             # 3. live RTSP cameras (optional)
+cd frontend; npm run dev                                                 # 4. UI on :3000
+```
+
+Open **http://localhost:3000**. The API docs are at http://127.0.0.1:8000/docs.
+
+### Try it
+
+1. **Cameras → Add camera**, type *File*. Upload an MP4 with the time it was recorded. The
+   worker keeps only the parts where something happens; they appear under **Stored segments**,
+   and their badges move from "Analysis queued" to "Analysed".
+2. Search the analysed footage (the Investigate page arrives in Phase 4):
+
+   ```bash
+   python -m services.query_engine.search "a person walks to the door"
+   ```
+
+3. For live cameras without real hardware, start the two simulated RTSP cameras
+   (see [Simulated cameras](#simulated-cameras)), keep process 3 running, and add
+   `rtsp://127.0.0.1:8554/cam-01` as an RTSP camera. It appears on **Live cameras**.
+
+### Stop
+
+Press **Ctrl+C** in each terminal (live ingestion stores its open segments first), then
+`docker compose down`. The data stays in Docker volumes; `docker compose down -v` deletes it.
+
 ## Getting started
 
 Requires Python 3.12.
