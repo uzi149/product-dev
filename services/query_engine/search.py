@@ -5,12 +5,14 @@
     python -m services.query_engine.search "a car parks" --camera "Car park" --since 24h
     python -m services.query_engine.search "someone runs" --start 2026-10-28T09:00 --end 2026-10-28T10:00
     python -m services.query_engine.search "a red car yesterday" --limit 5 --json
+    python -m services.query_engine.search "a car parks" --ranking rrf
 
 Camera names and time phrases in the query become filters (step 4.1; "yesterday" in this
 machine's time zone, or --timezone); --camera, --since, --start and --end win over them, and
---no-parse searches the text as it is. Each hit shows the camera, the window's time, the scores,
-what the VLM wrote, and a link that plays exactly that window (it opens in the browser for an
-hour). Times without a zone are local.
+--no-parse searches the text as it is. Hits are ranked by the hybrid score of step 4.2
+(--ranking rrf: step 3.4's rank fusion). Each hit shows the camera, the window's time, the
+scores, what the VLM wrote, and a link that plays exactly that window (it opens in the browser
+for an hour). Times without a zone are local.
 """
 
 import argparse
@@ -84,11 +86,17 @@ def render(hits: list[dict]) -> str:
     for rank, hit in enumerate(hits, 1):
         start = datetime.fromisoformat(hit["start_time"])
         end = datetime.fromisoformat(hit["end_time"])
+        scores = (
+            f"text {_score(hit['text_score'])} #{hit['text_rank'] or '-'}, "
+            f"visual {_score(hit['visual_score'])} #{hit['visual_rank'] or '-'}"
+        )
+        if hit.get("signals"):
+            scores += (
+                f", keyword {_score(hit['keyword_score'])}, action {_score(hit['action_score'])}"
+            )
         lines.append(
             f"{rank}. {hit['camera_name']}  {_local(start)} - {_local(end)[11:]}  "
-            f"fused {hit['fused_score']:.4f} (text {_score(hit['text_score'])} "
-            f"#{hit['text_rank'] or '-'}, visual {_score(hit['visual_score'])} "
-            f"#{hit['visual_rank'] or '-'})"
+            f"fused {hit['fused_score']:.4f} ({scores})"
         )
         if hit["description"]:
             lines.append(f"   {hit['description']}")
@@ -124,6 +132,12 @@ def main(argv: list[str] | None = None) -> int:
     when.add_argument("--start", type=_time, help="ISO time, e.g. 2026-10-28T09:00")
     parser.add_argument("--end", type=_time, help="ISO time (with --start, or alone)")
     parser.add_argument("--limit", type=int, default=10)
+    parser.add_argument(
+        "--ranking",
+        choices=["hybrid", "rrf"],
+        default="hybrid",
+        help="hybrid score (default) or step 3.4's rank fusion, for comparison",
+    )
     parser.add_argument("--json", action="store_true", help="print JSON instead of text")
     parser.add_argument("--timezone", type=_zone, help="for time phrases, e.g. Asia/Karachi")
     parser.add_argument(
@@ -158,6 +172,7 @@ def main(argv: list[str] | None = None) -> int:
                 start=parsed.start,
                 end=parsed.end,
                 limit=args.limit,
+                ranking=args.ranking,
             )
         except (LookupError, IndexSettingsMismatch) as error:
             print(error, file=sys.stderr)

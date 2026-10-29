@@ -8,10 +8,11 @@ from sqlalchemy import text
 from services.query_engine.retrieval import search
 from shared.database.index_settings import IndexSettingsMismatch, ensure_index_settings
 from shared.database.models import EMBEDDING_DIM, Keyframe
-from tests.search.conftest import IMAGE, Q_PICTURE, Q_TEXT, QUERY, START, TEXT, near
+from tests.search.conftest import IMAGE, OPEN, Q_PICTURE, Q_TEXT, QUERY, START, TEXT, near
 
 
 def run(session, **filters):
+    filters.setdefault("settings", OPEN)
     return search(session, QUERY, text_embedder=TEXT, image_embedder=IMAGE, **filters)
 
 

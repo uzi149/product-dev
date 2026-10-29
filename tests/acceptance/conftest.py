@@ -26,6 +26,11 @@ def acceptance_dirs() -> list[Path]:
     return [ROOT / name for name in names if (ROOT / name).is_dir()]
 
 
+def keep() -> bool:
+    """ACCEPTANCE_KEEP=1: leave the database and bucket for a look (emptied at the next run)."""
+    return os.environ.get("ACCEPTANCE_KEEP") == "1"
+
+
 @pytest.fixture(scope="module")
 def acceptance_settings() -> Settings:
     """The .env settings (VLM key, models) with the acceptance database and bucket."""
@@ -47,6 +52,8 @@ def acceptance_db(acceptance_settings):
     engine = create_engine(acceptance_settings.database_url)
     yield sessionmaker(bind=engine, class_=Session, expire_on_commit=False)
     engine.dispose()
+    if keep():
+        return
     with _admin_connect(acceptance_settings) as conn:
         conn.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(name))
 
@@ -57,4 +64,5 @@ def acceptance_storage(acceptance_settings):
     storage.ensure_bucket()
     storage.delete_prefix("")
     yield storage
-    storage.delete_prefix("")
+    if not keep():
+        storage.delete_prefix("")
