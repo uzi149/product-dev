@@ -94,10 +94,12 @@ test("the shell shows every screen in the sidebar and the API health", async ({ 
   ]);
   await expect(page.locator("aside").getByText("Operational")).toBeVisible();
 
-  for (const route of ["/events", "/investigate", "/triggers", "/settings"]) {
+  for (const route of ["/events", "/triggers", "/settings"]) {
     await page.goto(route);
     await expect(page.getByText("Not built yet")).toBeVisible();
   }
+  await page.goto("/investigate");
+  await expect(page.getByLabel("Question")).toBeVisible();
 });
 
 test("add a camera, upload a video, and play the active part that was stored", async ({ page }) => {

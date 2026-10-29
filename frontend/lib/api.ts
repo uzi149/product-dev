@@ -4,7 +4,10 @@ import type {
   CameraUpdate,
   ConnectionTestResult,
   DeletePreview,
+  EvidenceItem,
   Health,
+  QueryInput,
+  QueryState,
   Segment,
   StaticPeriod,
   StatusCounts,
@@ -92,6 +95,13 @@ export const api = {
       "/segments/reanalyse",
       json("POST", { camera_id: params.cameraId, start: params.start ?? null, end: params.end ?? null }),
     ),
+  createQuery: (input: QueryInput) => request<QueryState>("/queries", json("POST", input)),
+  query: (id: string) => request<QueryState>(`/queries/${id}`),
+  queryResults: (id: string) => request<EvidenceItem[]>(`/queries/${id}/results`),
+  /** The progress WebSocket: the API's address with ws:// or wss://. */
+  queryProgressUrl: (id: string) => `${API_URL.replace(/^http/, "ws")}/queries/${id}/progress`,
+  keyframeUrl: (keyframeId: string, attempt = 0) =>
+    mediaUrl(`/keyframes/${keyframeId}/image`, { r: attempt || null }),
   /** `attempt` > 0 after a failed load: a new URL, so the API signs a new MinIO link. */
   playbackUrl: (segmentId: string, attempt = 0) =>
     mediaUrl(`/segments/${segmentId}/playback`, { r: attempt || null }),

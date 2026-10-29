@@ -36,12 +36,12 @@ export async function createCamera(body: Record<string, unknown>): Promise<{ id:
   return response.json();
 }
 
-/** A file camera with one stored segment, made through the API; returns both ids. */
-export async function cameraWithSegment(): Promise<{ cameraId: string; segmentId: string; name: string }> {
-  const camera = await createCamera({});
+/** Uploads the activity video to a camera and waits for its segment; returns the segment id. */
+export async function addSegment(cameraId: string, startTime: string): Promise<string> {
+  const before: { id: string }[] = await (await fetch(`${API}/segments?camera_id=${cameraId}`)).json();
   const form = new FormData();
-  form.set("camera_id", camera.id);
-  form.set("start_time", "2026-03-07T09:05:00Z");
+  form.set("camera_id", cameraId);
+  form.set("start_time", startTime);
   form.set("file", new Blob([readFileSync(activityVideo())], { type: "video/mp4" }), "clip.mp4");
   expect((await fetch(`${API}/videos/upload`, { method: "POST", body: form })).status).toBe(202);
 
@@ -49,11 +49,18 @@ export async function cameraWithSegment(): Promise<{ cameraId: string; segmentId
   await expect
     .poll(
       async () => {
-        segments = await (await fetch(`${API}/segments?camera_id=${camera.id}`)).json();
+        segments = await (await fetch(`${API}/segments?camera_id=${cameraId}`)).json();
         return segments.length;
       },
       { timeout: 120_000 },
     )
-    .toBe(1);
-  return { cameraId: camera.id, segmentId: segments[0].id, name: camera.display_name };
+    .toBe(before.length + 1);
+  return segments.find((s) => !before.some((b) => b.id === s.id))!.id;
+}
+
+/** A file camera with one stored segment, made through the API; returns both ids. */
+export async function cameraWithSegment(): Promise<{ cameraId: string; segmentId: string; name: string }> {
+  const camera = await createCamera({});
+  const segmentId = await addSegment(camera.id, "2026-03-07T09:05:00Z");
+  return { cameraId: camera.id, segmentId, name: camera.display_name };
 }

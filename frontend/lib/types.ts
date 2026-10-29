@@ -121,3 +121,101 @@ export interface Health {
   storage: boolean;
   vlm_backend: VlmBackend;
 }
+
+/** A plain-English query (step 4.4). Chosen cameras and times win over the ones in the text. */
+export interface QueryInput {
+  query_text: string;
+  camera_ids?: string[] | null;
+  start?: string | null;
+  end?: string | null;
+  /** The browser's IANA time zone, for "yesterday" and the like. */
+  timezone: string;
+  /** false: keep camera names / time words as search text (a removed chip). */
+  parse_cameras?: boolean;
+  parse_times?: boolean;
+}
+
+/** What the query was understood as: a chip in the UI. */
+export interface Understood {
+  kind: "camera" | "time";
+  label: string;
+  camera_id: string | null;
+}
+
+export type QueryStage = "searching" | "candidates" | "verifying" | "done";
+
+export interface QueryCounts {
+  candidates: number;
+  to_verify: number;
+  verified: number;
+  rejected: number;
+  unverifiable: number;
+  possible: number;
+}
+
+export interface QueryState {
+  id: string;
+  query_text: string;
+  search_text: string | null;
+  understood: Understood[];
+  camera_ids: string[] | null;
+  start: string | null;
+  end: string | null;
+  status: "pending" | "running" | "done" | "failed";
+  stage: QueryStage | null;
+  /** "skipped" when the VLM is the local model (ADR 0029). */
+  verification: "on" | "skipped" | null;
+  error: string | null;
+  created_at: string;
+  finished_at: string | null;
+  counts: QueryCounts;
+}
+
+export interface VideoPart {
+  type: "video";
+  camera_id: string;
+  segment_id: string;
+  source_start_ms: number;
+  source_end_ms: number;
+  start_time: string;
+  end_time: string;
+}
+
+/** Footage between two parts that is not shown (scope §11). */
+export interface GapPart {
+  type: "gap";
+  duration_ms: number;
+}
+
+export interface PlaybackManifest {
+  result_id: string;
+  camera_id: string;
+  start_time: string;
+  end_time: string;
+  parts: (VideoPart | GapPart)[];
+}
+
+export type EvidenceStatus = "possible" | "verified" | "rejected" | "unverifiable";
+
+/** One merged result of a query, best first. */
+export interface EvidenceItem {
+  id: string;
+  rank: number;
+  camera_id: string;
+  camera_name: string;
+  start_time: string;
+  end_time: string;
+  score: number;
+  status: EvidenceStatus;
+  verification_confidence: number | null;
+  verification_reason: string | null;
+  summary: string | null;
+  keyframe_id: string | null;
+  manifest: PlaybackManifest;
+}
+
+/** What the progress WebSocket sends after every change. */
+export interface QuerySnapshot {
+  state: QueryState;
+  results: EvidenceItem[];
+}

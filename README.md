@@ -108,11 +108,10 @@ Open **http://localhost:3000**. The API docs are at http://127.0.0.1:8000/docs.
 1. **Cameras → Add camera**, type *File*. Upload an MP4 with the time it was recorded. The
    worker keeps only the parts where something happens; they appear under **Stored segments**,
    and their badges move from "Analysis queued" to "Analysed".
-2. Search the analysed footage (the Investigate page arrives in Phase 4):
-
-   ```bash
-   python -m services.query_engine.search "a person walks to the door"
-   ```
+2. **Investigate**: ask in plain English, e.g. "a person walks to the door today". Results show
+   as possible matches within seconds (the first query waits about 40 s while the query worker
+   loads its models) and are verified one by one; each plays as merged evidence. The same search
+   on the command line: `python -m services.query_engine.search "a person walks to the door"`.
 
 3. For live cameras without real hardware, start the two simulated RTSP cameras
    (see [Simulated cameras](#simulated-cameras)), keep process 3 running, and add
@@ -549,6 +548,14 @@ The UI follows the Sentinel prototype (dark theme). What works so far:
 - **Live cameras:** the latest picture of every RTSP camera, refreshed every 5 s, with its
   status (Live, Connecting, Offline, Disabled) and an Activity marker. It says so when live
   ingestion isn't running. A tile opens that camera's timeline.
+- **Investigate:** a question in plain English, optional cameras and From/To. The cameras and
+  times the question names show as chips ("Camera: CAM-02", "Time: Yesterday"); removing one
+  searches again without it. The four stages of the search tick off live (WebSocket, polling as
+  a fallback). Results are "Possible match" until the VLM verifies them ("Verified 87%", its
+  reason on hover); rejected ones leave the list, and results it didn't check are listed under
+  "Not verified" (with the local model nothing is verified, ADR 0029). The evidence player plays
+  a result's parts in order and shows "5 minutes 12 seconds not shown" between separated parts,
+  with a bar of the parts and gaps. The query id stays in the URL (`?q=…`).
 
 The other screens are placeholders that say which phase builds them.
 
