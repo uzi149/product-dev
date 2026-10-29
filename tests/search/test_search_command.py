@@ -71,3 +71,32 @@ def test_time_flags(windows, run):
     assert [h["camera_name"] for h in json.loads(out)] == ["Front door"]
     with pytest.raises(SystemExit):
         run("doorbell", "--since", "1h", "--end", "2026-03-07T10:00")
+
+
+def test_camera_names_and_times_in_the_query_become_filters(windows, run):
+    code, out, _ = run("doorbell at the yard on 2026-03-07", "--timezone", "UTC")
+    assert code == 0
+    assert "understood: camera Yard, on 2026-03-07; searching for: doorbell" in out
+    assert "1. Yard" in out and "Front door" not in out
+    _, out, _ = run("doorbell on 2026-03-08", "--timezone", "UTC")
+    assert "no matching windows" in out
+
+
+def test_explicit_flags_win_over_the_query(windows, run):
+    _, out, _ = run("doorbell at the yard", "--camera", "Front door", "--json")
+    assert [h["camera_name"] for h in json.loads(out)] == ["Front door"]
+
+
+def test_no_parse_searches_the_text_as_it_is(windows, run):
+    _, out, _ = run("doorbell yard", "--no-parse", "--json")
+    assert len(json.loads(out)) == 2
+
+
+def test_only_cameras_and_times_is_refused(windows, run):
+    code, _, err = run("yard yesterday")
+    assert code == 2 and "add what you're looking for" in err
+
+
+def test_an_unknown_time_zone_is_refused(run):
+    with pytest.raises(SystemExit):
+        run("doorbell", "--timezone", "Mars/Olympus")

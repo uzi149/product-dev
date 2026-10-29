@@ -26,6 +26,8 @@ dependencies = [
     "celery[redis]>=5.4",
     # Encrypts camera source URIs
     "cryptography>=43",
+    # Time zones for query phrases such as "yesterday" (zoneinfo has no data on Windows)
+    "tzdata>=2024.1",
     # Video
     "opencv-python>=4.10",
     "numpy>=1.26",

@@ -1,22 +1,28 @@
-"""Search the analysed footage with a plain-English query (Phase 3 has no UI).
+"""Search the analysed footage with a plain-English query (until the Investigate page, 4.5).
 
     python -m services.query_engine.search "a person rings the doorbell"
+    python -m services.query_engine.search "a car parks on Car park in the last 24 hours"
     python -m services.query_engine.search "a car parks" --camera "Car park" --since 24h
     python -m services.query_engine.search "someone runs" --start 2026-10-28T09:00 --end 2026-10-28T10:00
-    python -m services.query_engine.search "a red car" --limit 5 --json
+    python -m services.query_engine.search "a red car yesterday" --limit 5 --json
 
-Each hit shows the camera, the window's time, the scores, what the VLM wrote, and a link that
-plays exactly that window (it opens in the browser for an hour). Times without a zone are local.
+Camera names and time phrases in the query become filters (step 4.1; "yesterday" in this
+machine's time zone, or --timezone); --camera, --since, --start and --end win over them, and
+--no-parse searches the text as it is. Each hit shows the camera, the window's time, the scores,
+what the VLM wrote, and a link that plays exactly that window (it opens in the browser for an
+hour). Times without a zone are local.
 """
 
 import argparse
 import json
 import sys
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from services.query_engine.filters import CameraRef, ParsedQuery, apply_explicit, parse_query
 from services.query_engine.retrieval import WindowHit, search
 from shared.database.index_settings import IndexSettingsMismatch
 from shared.database.models import Camera, VideoSegment
@@ -42,6 +48,18 @@ def camera_ids_for(session: Session, names: list[str]) -> list:
             raise LookupError(f'no camera named "{name}"; cameras: {", ".join(known) or "none"}')
         ids.extend(found)
     return ids
+
+
+def all_cameras(session: Session) -> list[CameraRef]:
+    return [CameraRef(c.id, c.display_name) for c in session.scalars(select(Camera))]
+
+
+def describe_filters(parsed: ParsedQuery) -> str:
+    """What the query was understood as, e.g. `camera SIM CAM-01, last 2 hours`."""
+    parts = [
+        f"camera {u.label}" if u.kind == "camera" else u.label.lower() for u in parsed.understood
+    ]
+    return ", ".join(parts)
 
 
 def playback_url(session: Session, storage: StorageClient, hit: WindowHit) -> str:
@@ -90,6 +108,13 @@ def _time(text: str) -> datetime:
     return value if value.tzinfo else value.astimezone()  # no zone: local time
 
 
+def _zone(name: str) -> ZoneInfo:
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError) as error:
+        raise argparse.ArgumentTypeError(f"unknown time zone: {name}") from error
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("query")
@@ -100,17 +125,39 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--end", type=_time, help="ISO time (with --start, or alone)")
     parser.add_argument("--limit", type=int, default=10)
     parser.add_argument("--json", action="store_true", help="print JSON instead of text")
+    parser.add_argument("--timezone", type=_zone, help="for time phrases, e.g. Asia/Karachi")
+    parser.add_argument(
+        "--no-parse", action="store_true", help="don't read camera names and times from the query"
+    )
     args = parser.parse_args(argv)
     if args.since is not None and args.end is not None:
         parser.error("--end goes with --start, not with --since")
     start = datetime.now(UTC) - args.since if args.since is not None else args.start
 
     storage = get_storage()
+    tz = args.timezone or datetime.now().astimezone().tzinfo
     with get_sessionmaker()() as session:
         try:
             cameras = camera_ids_for(session, args.camera) if args.camera else None
+            if args.no_parse:
+                parsed = ParsedQuery(args.query)
+            else:
+                parsed = parse_query(args.query, all_cameras(session), datetime.now(UTC), tz)
+            parsed = apply_explicit(parsed, cameras, start, args.end)
+            if not parsed.search_text:
+                print("add what you're looking for, not only cameras and times", file=sys.stderr)
+                return 2
+            if parsed.understood and not args.json:
+                print(
+                    f"understood: {describe_filters(parsed)}; searching for: {parsed.search_text}"
+                )
             hits = search(
-                session, args.query, camera_ids=cameras, start=start, end=args.end, limit=args.limit
+                session,
+                parsed.search_text,
+                camera_ids=parsed.camera_ids or None,
+                start=parsed.start,
+                end=parsed.end,
+                limit=args.limit,
             )
         except (LookupError, IndexSettingsMismatch) as error:
             print(error, file=sys.stderr)
