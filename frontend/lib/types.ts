@@ -41,6 +41,15 @@ export interface CameraInput {
 
 export type CameraUpdate = Partial<Omit<CameraInput, "source_type">>;
 
+/** What deleting a camera removes; `blocker` says why it can't be deleted now (ADR 0026). */
+export interface DeletePreview {
+  segments: number;
+  static_periods: number;
+  analysed_windows: number;
+  uploads: number;
+  blocker: string | null;
+}
+
 export type ProcessingStatus = "pending" | "processing" | "done" | "failed";
 
 export interface Segment {
@@ -56,6 +65,17 @@ export interface Segment {
   width: number | null;
   height: number | null;
   created_at: string;
+  /** Failed, or stuck in `processing` (its worker stopped): it can be analysed again. */
+  retryable: boolean;
+}
+
+/** Segments per analysis state; `processing` leaves out the stuck ones. */
+export interface StatusCounts {
+  pending: number;
+  processing: number;
+  stuck: number;
+  done: number;
+  failed: number;
 }
 
 /** A stretch where the camera saw no change (`ok`), or could not be reached (`offline`). */
@@ -89,8 +109,15 @@ export interface ConnectionTestResult {
   error: string | null;
 }
 
+/** Where analysis sends the frames: an API host (OpenRouter, a local vLLM) or the local model. */
+export interface VlmBackend {
+  kind: "api" | "local";
+  host: string | null;
+}
+
 export interface Health {
   status: "ok" | "degraded";
   database: boolean;
   storage: boolean;
+  vlm_backend: VlmBackend;
 }

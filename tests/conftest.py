@@ -43,6 +43,7 @@ def pytest_collection_modifyitems(items):
                 "tests/analysis/test_analyze_segment",
                 "tests/analysis/test_queueing",
                 "tests/analysis/test_inspect",
+                "tests/analysis/test_retry",
                 "tests/search/test_retrieval",
                 "tests/search/test_search_command",
             )

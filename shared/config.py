@@ -111,6 +111,9 @@ class Settings(BaseSettings):
     analysis_enabled: bool = True
     # On start, an analysis worker queues the `pending` segments of this many past hours.
     analysis_sweep_hours: int = Field(default=24, ge=0)
+    # A segment `processing` with no progress for this long is "stuck" and can be retried
+    # (its worker stopped); step 3.5, ADR 0024.
+    analysis_stuck_minutes: int = Field(default=15, gt=0)
 
     # MVP plan §2
     keyframes_per_window: int = Field(default=6, gt=0)

@@ -197,6 +197,33 @@ def test_an_unavailable_vlm_retries_from_the_unfinished_window(
     assert status(session, segment) == "done"
 
 
+def test_each_status_change_and_window_is_recorded_as_progress(
+    session, make_segment, run, video_30s
+):
+    long_ago = datetime(2026, 1, 1, tzinfo=UTC)
+    seen = []
+
+    def watch(frames, prompt):
+        """Notes the segment's status and progress time when each window is described."""
+        session.expire_all()
+        row = session.get(VideoSegment, segment.id)
+        seen.append((row.status, row.status_changed_at))
+        return GOOD
+
+    segment = make_segment(video_30s)
+    segment.status_changed_at = long_ago
+    session.commit()
+    before = datetime.now(UTC)
+    run(segment, FakeVLM([watch]))
+
+    assert [s for s, _ in seen] == ["processing"] * 3
+    times = [t for _, t in seen]
+    assert times[0] >= before and times == sorted(times) and len(set(times)) == 3
+    session.expire_all()
+    finished = session.get(VideoSegment, segment.id)
+    assert finished.status == "done" and finished.status_changed_at > times[-1]
+
+
 def test_a_used_up_quota_fails_the_rest_without_retrying(session, make_segment, run, video_30s):
     segment = make_segment(video_30s)
     vlm = FakeVLM([GOOD, VLMQuotaExhausted("daily limit reached")])

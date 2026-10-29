@@ -1,17 +1,26 @@
 "use client";
 
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { Play, X } from "lucide-react";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Play, RotateCcw, X } from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
 import { SegmentVideo } from "@/components/cameras/stored-media";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { formatDateTime, formatDuration, localInputToIso } from "@/lib/format";
 import { LIST_POLL_MS } from "@/lib/refresh";
-import { segmentStatus } from "@/lib/segments";
+import { isStuck, retryFailedText, segmentStatus, STUCK_TONE } from "@/lib/segments";
 import { STATUS_TONE } from "@/lib/status";
 import type { Camera } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -31,6 +40,39 @@ export function SegmentsPanel({ camera }: { camera: Camera }) {
     // A new From/To keeps the current list on screen until the new one arrives.
     placeholderData: keepPreviousData,
   });
+  // The count on "Retry failed": every failed segment in From/To, not only the listed ones.
+  const counts = useQuery({
+    queryKey: ["segment-counts", camera.id, start, end],
+    queryFn: () => api.segmentStatusCounts({ cameraId: camera.id, start, end }),
+    refetchInterval: LIST_POLL_MS,
+    placeholderData: keepPreviousData,
+  });
+  // Shared with the app shell: names the VLM backend in the confirmation (ADR 0025).
+  const health = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 15_000 });
+
+  const queryClient = useQueryClient();
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ["segments", camera.id] });
+    queryClient.invalidateQueries({ queryKey: ["segment-counts", camera.id] });
+  };
+  const retryOne = useMutation({
+    mutationFn: (segmentId: string) => api.reanalyseSegment(segmentId),
+    onSuccess: () => toast.success("Segment queued for analysis"),
+    onError: (e: Error) => toast.error(e.message),
+    onSettled: refresh,
+  });
+  const [confirming, setConfirming] = useState(false);
+  const retryFailed = useMutation({
+    mutationFn: () => api.reanalyseFailed({ cameraId: camera.id, start, end }),
+    onSuccess: ({ queued }) => {
+      toast.success(`${queued} segment${queued === 1 ? "" : "s"} queued for analysis`);
+      setConfirming(false);
+    },
+    onError: (e: Error) => toast.error(e.message),
+    onSettled: refresh,
+  });
+  const failed = counts.data?.failed ?? 0;
+  const confirmText = retryFailedText(failed, health.data?.vlm_backend);
 
   return (
     <section className="overflow-hidden rounded-2xl border bg-card">
@@ -61,8 +103,34 @@ export function SegmentsPanel({ camera }: { camera: Camera }) {
               Clear
             </Button>
           )}
+          {failed > 0 && (
+            <Button variant="outline" onClick={() => setConfirming(true)}>
+              <RotateCcw /> Retry failed ({failed})
+            </Button>
+          )}
         </div>
       </div>
+
+      <Dialog open={confirming} onOpenChange={setConfirming}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{confirmText.title}</DialogTitle>
+            <DialogDescription>{confirmText.body}</DialogDescription>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {from || to ? "Only the failed segments within From/To." : "Every failed segment of this camera."} A
+            retry helps once the cause is fixed (for example the VLM credit or connection).
+          </p>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setConfirming(false)}>
+              Cancel
+            </Button>
+            <Button type="button" disabled={retryFailed.isPending} onClick={() => retryFailed.mutate()}>
+              {retryFailed.isPending ? "Queueing…" : "Analyse again"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {segments.isPending && <p className="p-4 text-sm text-muted-foreground">Loading…</p>}
       {segments.isError && (
@@ -79,6 +147,8 @@ export function SegmentsPanel({ camera }: { camera: Camera }) {
       <ul>
         {segments.data?.map((segment) => {
           const isPlaying = playingId === segment.id;
+          const stuck = isStuck(segment);
+          const status = segmentStatus(segment.status, stuck);
           return (
             <li key={segment.id} className={cn("border-b last:border-0", isPlaying && "bg-accent")}>
               <div className="grid grid-cols-[1fr_auto] items-center gap-3 px-4 py-3">
@@ -93,11 +163,22 @@ export function SegmentsPanel({ camera }: { camera: Camera }) {
                 <div className="flex items-center gap-2">
                   <Badge
                     variant="outline"
-                    title={segmentStatus(segment.status).hint}
-                    className={STATUS_TONE[segment.status]}
+                    title={status.hint}
+                    className={stuck ? STUCK_TONE : STATUS_TONE[segment.status]}
                   >
-                    {segmentStatus(segment.status).label}
+                    {status.label}
                   </Badge>
+                  {segment.retryable && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      title="Analyse this segment again"
+                      disabled={retryOne.isPending && retryOne.variables === segment.id}
+                      onClick={() => retryOne.mutate(segment.id)}
+                    >
+                      <RotateCcw /> Retry
+                    </Button>
+                  )}
                   {isPlaying ? (
                     <Button size="sm" variant="outline" onClick={() => setPlayingId(null)}>
                       <X /> Close

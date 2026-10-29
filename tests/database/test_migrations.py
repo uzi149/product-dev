@@ -85,3 +85,36 @@ def test_index_settings_migration_downgrades_on_its_own(migrated_db, alembic_con
     assert _tables(migrated_db) == EXPECTED_TABLES - {"index_settings"}
     command.upgrade(alembic_config, "head")
     assert "index_settings" in _tables(migrated_db)
+
+
+def test_segment_status_changed_at_starts_at_created_at(migrated_db, alembic_config):
+    command.downgrade(alembic_config, "0004")
+    engine = create_engine(migrated_db)
+    try:
+        with engine.begin() as conn:
+            camera = conn.execute(
+                text(
+                    "INSERT INTO cameras (display_name, source_type) VALUES ('m', 'file') "
+                    "RETURNING id"
+                )
+            ).scalar_one()
+            conn.execute(
+                text(
+                    "INSERT INTO video_segments (camera_id, start_time, end_time, duration_ms, "
+                    "storage_uri, created_at) VALUES (:camera, now(), now(), 1000, 's3://x', "
+                    "'2026-01-02T03:04:05Z')"
+                ),
+                {"camera": camera},
+            )
+        command.upgrade(alembic_config, "head")
+        with engine.connect() as conn:
+            same = conn.execute(
+                text("SELECT status_changed_at = created_at FROM video_segments")
+            ).scalar_one()
+        assert same
+        command.downgrade(alembic_config, "0004")
+        with engine.connect() as conn:
+            columns = {c["name"] for c in inspect(conn).get_columns("video_segments")}
+        assert "status_changed_at" not in columns
+    finally:
+        engine.dispose()

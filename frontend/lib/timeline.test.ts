@@ -29,6 +29,7 @@ function segment(id: string, from: number, to: number): Segment {
     width: 640,
     height: 360,
     created_at: iso(to),
+    retryable: false,
   };
 }
 

@@ -3,9 +3,11 @@ import type {
   CameraInput,
   CameraUpdate,
   ConnectionTestResult,
+  DeletePreview,
   Health,
   Segment,
   StaticPeriod,
+  StatusCounts,
   Upload,
 } from "./types";
 
@@ -41,6 +43,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw new ApiError(detail, response.status);
   }
+  if (response.status === 204) return null as T;
   return (await response.json()) as T;
 }
 
@@ -63,6 +66,9 @@ export const api = {
   createCamera: (input: CameraInput) => request<Camera>("/cameras", json("POST", input)),
   updateCamera: (id: string, input: CameraUpdate) =>
     request<Camera>(`/cameras/${id}`, json("PATCH", input)),
+  deletePreview: (id: string) => request<DeletePreview>(`/cameras/${id}/delete-preview`),
+  /** Deletes the camera with all its footage, analysis and uploads, for good (HTTP 204). */
+  deleteCamera: (id: string) => request<null>(`/cameras/${id}`, { method: "DELETE" }),
   testConnection: (id: string) =>
     request<ConnectionTestResult>(`/cameras/${id}/test-connection`, { method: "POST" }),
   segments: (params: { cameraId: string; start?: string; end?: string; limit?: number }) => {
@@ -71,6 +77,21 @@ export const api = {
     if (params.end) query.set("end", params.end);
     return request<Segment[]>(`/segments?${query}`);
   },
+  segmentStatusCounts: (params: { cameraId: string; start?: string; end?: string }) => {
+    const query = new URLSearchParams({ camera_id: params.cameraId });
+    if (params.start) query.set("start", params.start);
+    if (params.end) query.set("end", params.end);
+    return request<StatusCounts>(`/segments/status-counts?${query}`);
+  },
+  /** Analyse a failed or stuck segment again (HTTP 202). */
+  reanalyseSegment: (id: string) =>
+    request<{ queued: number }>(`/segments/${id}/reanalyse`, { method: "POST" }),
+  /** Analyse every failed segment of the camera within the range again. */
+  reanalyseFailed: (params: { cameraId: string; start?: string; end?: string }) =>
+    request<{ queued: number }>(
+      "/segments/reanalyse",
+      json("POST", { camera_id: params.cameraId, start: params.start ?? null, end: params.end ?? null }),
+    ),
   /** `attempt` > 0 after a failed load: a new URL, so the API signs a new MinIO link. */
   playbackUrl: (segmentId: string, attempt = 0) =>
     mediaUrl(`/segments/${segmentId}/playback`, { r: attempt || null }),

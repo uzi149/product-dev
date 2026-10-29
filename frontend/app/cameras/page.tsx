@@ -1,12 +1,13 @@
 "use client";
 
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { Pencil, Plug, Plus } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Pause, Pencil, Play, Plug, Plus, Trash2 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { toast } from "sonner";
 import { CameraFormDialog } from "@/components/cameras/camera-form-dialog";
 import { CameraTimeline } from "@/components/cameras/camera-timeline";
+import { DeleteCameraDialog } from "@/components/cameras/delete-camera-dialog";
 import { SegmentsPanel } from "@/components/cameras/segments-panel";
 import { UploadCard } from "@/components/cameras/upload-card";
 import { RecentUploads } from "@/components/cameras/recent-uploads";
@@ -47,6 +48,28 @@ function CamerasView() {
   }
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Camera | null>(null);
+  const [deleting, setDeleting] = useState<Camera | null>(null);
+  const queryClient = useQueryClient();
+
+  // Stops or starts recording an RTSP camera: live ingestion follows within 30 s.
+  const toggle = useMutation({
+    mutationFn: (camera: Camera) => api.updateCamera(camera.id, { enabled: !camera.enabled }),
+    onSuccess: (saved) => {
+      queryClient.invalidateQueries({ queryKey: ["cameras"] });
+      toast.success(
+        saved.enabled
+          ? `${saved.display_name} enabled: recording starts within 30 s`
+          : `${saved.display_name} disabled: recording stops within 30 s`,
+      );
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  function onDeleted(camera: Camera) {
+    if (camera.id === selectedId) {
+      setPicked(null);
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+  }
 
   const test = useMutation({
     mutationFn: (camera: Camera) => api.testConnection(camera.id),
@@ -131,7 +154,7 @@ function CamerasView() {
                     {camera.retention_days} days
                   </p>
                 </button>
-                <div className="mt-3 flex gap-2">
+                <div className="mt-3 flex flex-wrap gap-2">
                   <Button size="sm" variant="outline" onClick={() => setEditing(camera)}>
                     <Pencil /> Edit
                   </Button>
@@ -148,6 +171,27 @@ function CamerasView() {
                         : "Test connection"}
                     </Button>
                   )}
+                  {camera.source_type === "rtsp" && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={toggle.isPending && toggle.variables?.id === camera.id}
+                      onClick={() => toggle.mutate(camera)}
+                    >
+                      {camera.enabled ? <Pause /> : <Play />}
+                      {camera.enabled ? "Disable" : "Enable"}
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    className="ml-auto"
+                    aria-label={`Delete ${camera.display_name}`}
+                    title="Delete this camera and all its footage"
+                    onClick={() => setDeleting(camera)}
+                  >
+                    <Trash2 />
+                  </Button>
                 </div>
               </li>
             ))}
@@ -173,6 +217,14 @@ function CamerasView() {
           open
           onOpenChange={setAdding}
           onSaved={(camera) => select(camera.id)}
+        />
+      )}
+      {deleting && (
+        <DeleteCameraDialog
+          key={deleting.id}
+          camera={deleting}
+          onOpenChange={(open) => !open && setDeleting(null)}
+          onDeleted={onDeleted}
         />
       )}
       {editing && (

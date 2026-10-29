@@ -1,12 +1,13 @@
 from uuid import UUID
 
 import redis
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from services.api.deps import get_redis, get_session, get_storage_client
+from services.cameras import delete as deletion
 from shared.camera_status import ingestion_running, read_statuses
 from shared.crypto import CryptoError, decrypt_text, encrypt_text
 from shared.database.models import Camera, SourceType, VideoSegment
@@ -15,6 +16,7 @@ from shared.schemas.camera import (
     CameraRead,
     CameraUpdate,
     ConnectionTestResult,
+    DeletePreview,
     LiveStatus,
     mask_uri,
 )
@@ -167,6 +169,36 @@ def update_camera(
     session.refresh(camera)
     live = _live_statuses(client, [camera]).get(camera_id)
     return _read(camera, _segment_count(session, camera_id), live)
+
+
+@router.get("/{camera_id}/delete-preview", response_model=DeletePreview)
+def delete_preview(
+    camera_id: UUID,
+    session: Session = Depends(get_session),
+    client: redis.Redis = Depends(get_redis),
+) -> DeletePreview:
+    """What deleting the camera removes, and whether it can be deleted now (ADR 0026)."""
+    camera = _get_camera(session, camera_id)
+    return DeletePreview.model_validate(deletion.preview(session, client, camera))
+
+
+@router.delete("/{camera_id}", status_code=204)
+def delete_camera(
+    camera_id: UUID,
+    session: Session = Depends(get_session),
+    storage: StorageClient = Depends(get_storage_client),
+    client: redis.Redis = Depends(get_redis),
+) -> Response:
+    """Delete the camera with all its footage, analysis and uploads, for good (ADR 0026)."""
+    camera = _get_camera(session, camera_id)
+    blocker = deletion.deletion_blocker(session, client, camera)
+    if blocker is not None:
+        raise HTTPException(409, blocker)
+    try:
+        deletion.delete_camera(session, storage, client, camera)
+    except deletion.StorageUnavailable as error:
+        raise HTTPException(503, str(error)) from error
+    return Response(status_code=204)
 
 
 @router.get("/{camera_id}/snapshot")

@@ -5,7 +5,7 @@ import shutil
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from services.ingestion.outbox import ITEM_FILE, Outbox, Uploader
@@ -137,6 +137,34 @@ def test_footage_of_a_deleted_camera_is_dropped(outbox, uploader, camera, sessio
     assert uploader.run_once()
     assert outbox.pending() == []
     assert count(engine, StaticPeriod) == 0
+
+
+def test_a_camera_deleted_while_its_segment_is_stored_leaves_no_file(
+    outbox, camera, engine, storage, tmp_path
+):
+    """The camera is deleted between the uploader's check and its commit (step 3.6)."""
+
+    class DeletingStorage:
+        def __init__(self, inner):
+            self.inner = inner
+
+        def upload_file(self, *args, **kwargs):
+            uri = self.inner.upload_file(*args, **kwargs)
+            with Session(engine) as other:
+                other.execute(delete(Camera).where(Camera.id == camera.id))
+                other.commit()
+            return uri
+
+        def __getattr__(self, name):
+            return getattr(self.inner, name)
+
+    outbox.add_segment(camera.id, fragments(tmp_path), START, 0.03)
+    uploader = Uploader(outbox, DeletingStorage(storage), lambda: Session(engine))
+    assert uploader.run_once()
+    assert outbox.pending() == []
+    assert count(engine, VideoSegment) == 0
+    objects = storage._client.list_objects(storage.bucket, f"segments/{camera.id}/", recursive=True)
+    assert not list(objects)
 
 
 def test_damaged_footage_is_set_aside_instead_of_retried(

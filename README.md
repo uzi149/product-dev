@@ -151,6 +151,11 @@ uvicorn services.api.main:app --reload     # http://127.0.0.1:8000  (docs at /do
 ```
 
 - `POST /cameras`, `GET /cameras`, `PATCH /cameras/{id}`, `POST /cameras/{id}/test-connection`
+- `DELETE /cameras/{id}` (`204`): the camera with all its footage, analysis, uploads and files,
+  for good (ADR 0026). `409` with the reason while an RTSP camera is still recording (disable it
+  first; ingestion lets go within 30 s), while one of its uploads is being processed, or when it
+  has events; `503` when MinIO is down (nothing deleted). `GET /cameras/{id}/delete-preview`
+  counts what would go and gives the reason it can't be deleted now, if any
 - `GET /cameras` and `GET /cameras/{id}` include a `live` field for RTSP cameras (`null` for
   file cameras): `state` (`online`, `connecting`, `offline`, `disabled`, `not_running` when live
   ingestion isn't running, `unknown` when Redis is down), `since`, `activity`, `last_frame_at`,
@@ -293,7 +298,16 @@ python -m services.analysis.inspect SEGMENT_ID                   # what the VLM 
 python -m services.analysis.inspect --camera "Front door" --latest 3
 python -m services.analysis.requeue --status pending --since 2h  # queue footage on purpose
 python -m services.analysis.requeue --status failed              # retry after fixing the cause
+python -m services.analysis.requeue --status stuck               # retry segments whose worker stopped
 ```
+
+The Cameras page does the same without the command line (ADR 0024). In **Stored segments**, a
+failed row has a **Retry** button, and so does a row marked "Analysis stuck": `processing` with
+no progress for `ANALYSIS_STUCK_MINUTES` (default 15), usually because its worker stopped.
+**Retry failed (N)** retries every failed segment of the camera within the panel's From/To, after
+a confirmation that names the count and where the frames go (OpenRouter, another API host or the
+local model; ADR 0025). A retry only helps once the cause is fixed; the reason is in the
+analysis worker log and in `inspect`.
 
 Footage stored before Phase 3 is `pending`: queue it with `requeue` (with an API key this sends
 its keyframes to OpenRouter, so test videos only). On start, an analysis worker queues the
@@ -376,7 +390,9 @@ The UI follows the Sentinel prototype (dark theme). What works so far:
 - **Cameras:** add a camera, upload a video with its start time, follow its processing under
   "Recent uploads", and play the stored segments. A camera's **timeline** shows stored
   segments, static periods and offline stretches for the last hour, 6 hours, 24 hours or a
-  chosen day; click a segment to play it.
+  chosen day; click a segment to play it. **Disable** / **Enable** on an RTSP camera's card
+  stops or starts recording (within 30 s). The bin button deletes a camera with all its data,
+  after a confirmation that says what goes.
 - **Live cameras:** the latest picture of every RTSP camera, refreshed every 5 s, with its
   status (Live, Connecting, Offline, Disabled) and an Activity marker. It says so when live
   ingestion isn't running. A tile opens that camera's timeline.
