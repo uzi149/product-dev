@@ -392,14 +392,28 @@ and time filters, and the two ranked lists are combined by rank (reciprocal rank
 
 ```bash
 python -m services.query_engine.search "a person rings the doorbell"
+python -m services.query_engine.search "someone left a bag on CAM-02 yesterday afternoon"
 python -m services.query_engine.search "a car parks" --camera "Car park" --since 24h
 python -m services.query_engine.search "someone runs" --start 2026-10-28T09:00 --end 2026-10-28T10:00 --json
 ```
 
+**Cameras and times in the query** become filters (step 4.1), and only the rest is searched; the
+command prints what it understood (`understood: camera CAM-02, yesterday afternoon; searching
+for: someone left a bag`):
+
+- **Cameras:** any camera's name as whole words, not case-sensitive, with spacing, dashes and
+  leading zeros ignored (`cam 2` finds `CAM-02`).
+- **Times:** `today`, `yesterday`, `tonight`, `last night`, `this morning` / `afternoon` /
+  `evening` (also after `yesterday` or a date), `last 2 hours` / `past 30 min` / `in the last 3
+  days`, `since 9am` / `since yesterday`, `between 14:00 and 15:30` / `from 2pm to 3pm`,
+  `at 14:20` / `around noon` (30 min either side), `on 2026-03-07` / `7 March` / `March 7th`,
+  `on Monday` / `last Monday`. A time needs a colon or am/pm; a bare number is never a time.
+- They're read in this machine's time zone (`--timezone Asia/Karachi` to choose). `--camera`,
+  `--since`, `--start` and `--end` win over the query; `--no-parse` searches the text as it is.
+
 Each hit shows the camera, the window's time, the scores, the description and a `play:` link
-that opens the segment in the browser at that window (`#t=start,end`). Camera names are not
-case-sensitive and `--camera` can repeat; times without a zone are local. Parsing cameras and
-times out of the query itself comes in Phase 4.
+that opens the segment in the browser at that window (`#t=start,end`). `--camera` is not
+case-sensitive and can repeat; times without a zone are local.
 
 ### Phase 3 acceptance
 
