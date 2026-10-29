@@ -293,7 +293,16 @@ python -m services.analysis.inspect SEGMENT_ID                   # what the VLM 
 python -m services.analysis.inspect --camera "Front door" --latest 3
 python -m services.analysis.requeue --status pending --since 2h  # queue footage on purpose
 python -m services.analysis.requeue --status failed              # retry after fixing the cause
+python -m services.analysis.requeue --status stuck               # retry segments whose worker stopped
 ```
+
+The Cameras page does the same without the command line (ADR 0024). In **Stored segments**, a
+failed row has a **Retry** button, and so does a row marked "Analysis stuck": `processing` with
+no progress for `ANALYSIS_STUCK_MINUTES` (default 15), usually because its worker stopped.
+**Retry failed (N)** retries every failed segment of the camera within the panel's From/To, after
+a confirmation that names the count and where the frames go (OpenRouter, another API host or the
+local model; ADR 0025). A retry only helps once the cause is fixed; the reason is in the
+analysis worker log and in `inspect`.
 
 Footage stored before Phase 3 is `pending`: queue it with `requeue` (with an API key this sends
 its keyframes to OpenRouter, so test videos only). On start, an analysis worker queues the

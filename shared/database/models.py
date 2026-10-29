@@ -6,7 +6,7 @@ Status-like columns are text with a CHECK constraint built from the StrEnums bel
 
 import enum
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from pgvector.sqlalchemy import Vector
@@ -142,11 +142,18 @@ class VideoSegment(Base):
     width: Mapped[int | None] = mapped_column(Integer)
     height: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = _created_at()
+    # When the analysis last changed `status` or made progress: tells a stuck segment from a
+    # running one (step 3.5).
+    status_changed_at: Mapped[datetime] = _created_at()
 
     camera: Mapped[Camera] = relationship(back_populates="segments")
     windows: Mapped[list["AnalysisWindow"]] = relationship(
         back_populates="segment", cascade="all, delete-orphan", passive_deletes=True
     )
+
+    def set_status(self, status: str, at: datetime | None = None) -> None:
+        self.status = status
+        self.status_changed_at = at or datetime.now(UTC)
 
 
 class StaticPeriod(Base):

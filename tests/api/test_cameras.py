@@ -135,7 +135,13 @@ def test_connection_test_for_a_file_camera(client):
 
 
 def test_health(client):
-    assert client.get("/health").json() == {"status": "ok", "database": True, "storage": True}
+    body = client.get("/health").json()
+    assert {k: body[k] for k in ("status", "database", "storage")} == {
+        "status": "ok",
+        "database": True,
+        "storage": True,
+    }
+    assert body["vlm_backend"]["kind"] in ("api", "local")
 
 
 def test_cors_allows_the_dev_server_on_any_local_port_only(client):

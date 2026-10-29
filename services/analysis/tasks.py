@@ -132,7 +132,7 @@ def _process(
         log.error("segment %s is not analysed: %s", segment_id, error)
         return
 
-    segment.status = ProcessingStatus.PROCESSING
+    segment.set_status(ProcessingStatus.PROCESSING)
     session.commit()
     camera = session.get(Camera, segment.camera_id)
     windows = plan_windows(
@@ -198,7 +198,9 @@ def _set_window(
     status: ProcessingStatus,
     error: str | None = None,
 ) -> AnalysisWindow:
-    """The window's row, created on first use, with this status."""
+    """The window's row, created on first use, with this status. A window that changes counts
+    as progress of the segment, so a long analysis is never taken for a stuck one (step 3.5)."""
+    segment.status_changed_at = datetime.now(UTC)
     wid = window_id(segment.id, window.number)
     row = session.get(AnalysisWindow, wid)
     if row is None:
@@ -313,7 +315,7 @@ def _fail_unfinished(
         row = session.get(AnalysisWindow, window_id(segment.id, window.number))
         if row is None or row.processing_status != ProcessingStatus.DONE:
             _set_window(session, segment, window, ProcessingStatus.FAILED, reason)
-    segment.status = ProcessingStatus.FAILED
+    segment.set_status(ProcessingStatus.FAILED)
     session.commit()
 
 
@@ -322,7 +324,7 @@ def _finish(session: Session, segment: VideoSegment, windows: list[Window]) -> N
         select(AnalysisWindow.processing_status).where(AnalysisWindow.segment_id == segment.id)
     ).all()
     finished = len(rows) == len(windows) and all(s == ProcessingStatus.DONE for s in rows)
-    segment.status = ProcessingStatus.DONE if finished else ProcessingStatus.FAILED
+    segment.set_status(ProcessingStatus.DONE if finished else ProcessingStatus.FAILED)
     session.commit()
     log.info("segment %s: %s (%d window(s))", segment.id, segment.status, len(windows))
 

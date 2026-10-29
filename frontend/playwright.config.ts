@@ -2,7 +2,7 @@ import path from "node:path";
 
 import { defineConfig } from "@playwright/test";
 
-import { E2E_API_URL, E2E_UI_PORT } from "./e2e/stack";
+import { E2E_API_URL, E2E_PYTHON, E2E_UI_PORT } from "./e2e/stack";
 
 const ROOT = path.resolve(__dirname, "..");
 
@@ -11,11 +11,7 @@ const ROOT = path.resolve(__dirname, "..");
 // starts an e2e backend (API, worker, live ingestion) on its own database, bucket and Redis
 // database, emptied at every run, and a dev server on port 3100 that talks to it. The development
 // data and a running `npm run dev` or API are not touched. Not part of CI.
-const python =
-  process.env.E2E_PYTHON ??
-  (process.platform === "win32"
-    ? path.join(ROOT, ".venv", "Scripts", "python.exe")
-    : path.join(ROOT, ".venv", "bin", "python"));
+const python = E2E_PYTHON;
 
 export default defineConfig({
   testDir: "./e2e",
