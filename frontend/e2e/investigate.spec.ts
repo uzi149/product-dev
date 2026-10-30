@@ -35,6 +35,10 @@ test("a finished query shows its stages, badges and plays the evidence with a ga
 
   // The first result plays: part 1, then the gap card, then part 2.
   const evidence = page.getByRole("region", { name: "Evidence" });
+  // Above the player: the whole description and the VLM's reason.
+  await expect(evidence).toContainText("DescriptionA test pattern moves across a grey picture.");
+  await expect(evidence).toContainText("Why the VLM verified itA test pattern moves across a grey picture.");
+  await expect(evidence).toContainText("Verified 90%");
   await expect(evidence).toContainText("Part 1 of 2");
   await expect(evidence.locator('[data-kind="gap"]')).toHaveCount(1);
   await expect(evidence.getByRole("status")).toContainText("5 minutes 12 seconds not shown", { timeout: 20_000 });
@@ -44,6 +48,10 @@ test("a finished query shows its stages, badges and plays the evidence with a ga
   // Another result plays when picked.
   await results.nth(1).getByRole("button").click();
   await expect(evidence).toContainText("Part 1 of 1");
+  await expect(evidence).toContainText("DescriptionA grey picture.");
+  await expect(evidence).toContainText(
+    "Why it couldn't be verifiedcouldn't be verified: the VLM was not reachable",
+  );
 });
 
 test("the understood chips show what the question was read as", async ({ page }) => {

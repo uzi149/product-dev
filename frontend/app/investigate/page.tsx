@@ -8,7 +8,7 @@ import { EvidencePlayer } from "@/components/investigate/evidence-player";
 import { ProgressStages } from "@/components/investigate/progress-stages";
 import { QueryForm, UnderstoodChips } from "@/components/investigate/query-form";
 import { QueryHistory } from "@/components/investigate/query-history";
-import { ResultCard } from "@/components/investigate/result-card";
+import { EvidenceDetails, ResultCard } from "@/components/investigate/result-card";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
@@ -215,9 +215,7 @@ function InvestigateView() {
                 </div>
                 {selected && (
                   <section aria-label="Evidence" className="min-w-0 rounded-2xl border bg-card p-4">
-                    <h2 className="mb-3 text-xs font-semibold">
-                      Evidence · {selected.camera_name}
-                    </h2>
+                    <EvidenceDetails result={selected} />
                     <EvidencePlayer key={selected.id} result={selected} />
                   </section>
                 )}
