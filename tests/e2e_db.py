@@ -3,6 +3,8 @@
     python -m tests.e2e_db segment-status SEGMENT_ID failed
     python -m tests.e2e_db seed-query SEGMENT_ID SEGMENT_ID      # prints the query id
     python -m tests.e2e_db seed-query --pending CAMERA_ID         # a query no worker took
+    python -m tests.e2e_db seed-query --text "…" …                 # with this question (history)
+    python -m tests.e2e_db seed-history "TEXT" 25                 # 25 finished queries "TEXT 01"…
 
 The e2e stack runs with analysis off and without models, so no segment fails or gets stuck on
 its own and no query finds anything; seeded queries let the Investigate page be tested.
@@ -80,15 +82,17 @@ def _evidence(query: QuerySession, rank: int, parts: list[dict], **fields) -> Qu
     )
 
 
-def seed_finished(session: Session, first_id: UUID, second_id: UUID) -> UUID:
+def seed_finished(
+    session: Session, first_id: UUID, second_id: UUID, text: str = "a test pattern moves"
+) -> UUID:
     """A finished query with two results: a verified one in two parts with a gap between them
     (one part of each segment), and one that couldn't be verified."""
     first, second = session.get(VideoSegment, first_id), session.get(VideoSegment, second_id)
     if first is None or second is None:
         sys.exit("both segments must exist")
     query = QuerySession(
-        query_text="a test pattern moves",
-        search_text="a test pattern moves",
+        query_text=text,
+        search_text=text,
         understood_json=[],
         status=QueryStatus.DONE,
         stage="done",
@@ -121,13 +125,13 @@ def seed_finished(session: Session, first_id: UUID, second_id: UUID) -> UUID:
     return query.id
 
 
-def seed_pending(session: Session, camera_id: UUID) -> UUID:
+def seed_pending(session: Session, camera_id: UUID, text: str | None = None) -> UUID:
     """A query no worker has taken, understood as a camera and a time."""
     camera = session.get(Camera, camera_id)
     if camera is None:
         sys.exit(f"no camera {camera_id}")
     query = QuerySession(
-        query_text=f"a bag on {camera.display_name} yesterday",
+        query_text=text or f"a bag on {camera.display_name} yesterday",
         search_text="a bag",
         understood_json=[
             {"kind": "camera", "label": camera.display_name, "camera_id": str(camera.id)},
@@ -141,6 +145,25 @@ def seed_pending(session: Session, camera_id: UUID) -> UUID:
     return query.id
 
 
+def seed_history(session: Session, text: str, count: int) -> None:
+    """`count` finished queries without results, "TEXT 01" the oldest, a second apart."""
+    start = datetime.now(UTC) - timedelta(seconds=count)
+    for n in range(1, count + 1):
+        question = f"{text} {n:02d}"
+        session.add(
+            QuerySession(
+                query_text=question,
+                search_text=question,
+                understood_json=[],
+                status=QueryStatus.DONE,
+                stage="done",
+                verification="on",
+                created_at=start + timedelta(seconds=n),
+                finished_at=start + timedelta(seconds=n),
+            )
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     commands = parser.add_subparsers(dest="command", required=True)
@@ -149,7 +172,11 @@ def main(argv: list[str] | None = None) -> int:
     status.add_argument("status", choices=[*ProcessingStatus, "stuck"])
     seed = commands.add_parser("seed-query", help="store a query with results; prints its id")
     seed.add_argument("--pending", action="store_true", help="a pending query for CAMERA_ID")
+    seed.add_argument("--text", help="the question (default: one that fits the seeded results)")
     seed.add_argument("ids", type=UUID, nargs="+", help="two segment ids, or one camera id")
+    history = commands.add_parser("seed-history", help="store COUNT finished queries")
+    history.add_argument("text")
+    history.add_argument("count", type=int)
     args = parser.parse_args(argv)
 
     settings = e2e_settings()
@@ -160,12 +187,15 @@ def main(argv: list[str] | None = None) -> int:
         with Session(engine) as session:
             if args.command == "segment-status":
                 _set_segment_status(session, args.segment, args.status, settings)
+            elif args.command == "seed-history":
+                seed_history(session, args.text, args.count)
             elif args.pending:
-                print(seed_pending(session, args.ids[0]))
+                print(seed_pending(session, args.ids[0], args.text))
             else:
                 if len(args.ids) != 2:
                     sys.exit("seed-query needs two segment ids")
-                print(seed_finished(session, *args.ids))
+                extra = {"text": args.text} if args.text else {}
+                print(seed_finished(session, *args.ids, **extra))
             session.commit()
     finally:
         engine.dispose()

@@ -77,3 +77,43 @@ export function ResultCard({
     </li>
   );
 }
+
+const REASON_HEADING: Partial<Record<BadgeTone, string>> = {
+  verified: "Why the VLM verified it",
+  unverifiable: "Why it couldn't be verified",
+};
+
+/**
+ * Above the evidence player: the selected result's whole description (the card shortens it to two
+ * lines) and the VLM's reason for its verdict.
+ */
+export function EvidenceDetails({ result }: { result: EvidenceItem }) {
+  const badge = evidenceBadge(result);
+  const heading = REASON_HEADING[badge.tone];
+  return (
+    <div className="mb-3 grid gap-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-xs font-semibold">Evidence · {result.camera_name}</h2>
+        <Badge variant="outline" className={TONE[badge.tone]}>
+          {badge.label}
+        </Badge>
+      </div>
+      {result.summary && (
+        <div className="grid gap-0.5">
+          <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+            Description
+          </span>
+          <p className="text-sm">{result.summary}</p>
+        </div>
+      )}
+      {heading && result.verification_reason ? (
+        <div className="grid gap-0.5">
+          <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">{heading}</span>
+          <p className="text-sm">{result.verification_reason}</p>
+        </div>
+      ) : (
+        badge.tone === "possible" && <p className="text-xs text-muted-foreground">{badge.hint}.</p>
+      )}
+    </div>
+  );
+}

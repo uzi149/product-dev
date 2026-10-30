@@ -54,6 +54,14 @@ class QueryEvents:
     """Subscribes to a query's notices; without Redis, `wait` just sleeps (the WebSocket then
     only re-reads on its timer)."""
 
+    def notify(self, query_id: UUID) -> None:
+        """Wake the query's listeners from the API (a deleted query). Never raises."""
+        client = redis.Redis.from_url(
+            get_settings().redis_url, socket_timeout=2, socket_connect_timeout=2
+        )
+        publish(client, query_id)
+        client.close()
+
     @asynccontextmanager
     async def subscribe(self, query_id: UUID) -> AsyncIterator[Subscription]:
         client = aioredis.from_url(get_settings().redis_url)

@@ -133,3 +133,15 @@ def test_query_progress_migration_downgrades_on_its_own(migrated_db, alembic_con
         engine.dispose()
     command.upgrade(alembic_config, "head")
     assert "query_evidence" in _tables(migrated_db)
+
+
+def test_query_history_migration_downgrades_on_its_own(migrated_db, alembic_config):
+    command.downgrade(alembic_config, "0006")
+    engine = create_engine(migrated_db)
+    try:
+        with engine.connect() as conn:
+            columns = {c["name"] for c in inspect(conn).get_columns("query_sessions")}
+        assert "request_json" not in columns and "status" in columns
+    finally:
+        engine.dispose()
+    command.upgrade(alembic_config, "head")

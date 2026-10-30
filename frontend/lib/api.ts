@@ -7,6 +7,7 @@ import type {
   EvidenceItem,
   Health,
   QueryInput,
+  QueryList,
   QueryState,
   Segment,
   StaticPeriod,
@@ -97,6 +98,16 @@ export const api = {
     ),
   createQuery: (input: QueryInput) => request<QueryState>("/queries", json("POST", input)),
   query: (id: string) => request<QueryState>(`/queries/${id}`),
+  /** Query history, newest first (step 4.6); `q`: only questions with every one of its words. */
+  queries: (params: { limit: number; offset: number; q?: string }) => {
+    const query = new URLSearchParams({ limit: String(params.limit), offset: String(params.offset) });
+    if (params.q?.trim()) query.set("q", params.q.trim());
+    return request<QueryList>(`/queries?${query}`);
+  },
+  /** Asks the stored question again as a new query, relative times read now (HTTP 202). */
+  rerunQuery: (id: string) => request<QueryState>(`/queries/${id}/rerun`, { method: "POST" }),
+  /** Deletes the query with its results, for good (HTTP 204). */
+  deleteQuery: (id: string) => request<null>(`/queries/${id}`, { method: "DELETE" }),
   queryResults: (id: string) => request<EvidenceItem[]>(`/queries/${id}/results`),
   /** The progress WebSocket: the API's address with ws:// or wss://. */
   queryProgressUrl: (id: string) => `${API_URL.replace(/^http/, "ws")}/queries/${id}/progress`,

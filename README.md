@@ -110,8 +110,9 @@ Open **http://localhost:3000**. The API docs are at http://127.0.0.1:8000/docs.
    and their badges move from "Analysis queued" to "Analysed".
 2. **Investigate**: ask in plain English, e.g. "a person walks to the door today". Results show
    as possible matches within seconds (the first query waits about 40 s while the query worker
-   loads its models) and are verified one by one; each plays as merged evidence. The same search
-   on the command line: `python -m services.query_engine.search "a person walks to the door"`.
+   loads its models) and are verified one by one; each plays as merged evidence. Earlier
+   searches stay under **Recent searches**. The same search on the command line:
+   `python -m services.query_engine.search "a person walks to the door"`.
 
 3. For live cameras without real hardware, start the two simulated RTSP cameras
    (see [Simulated cameras](#simulated-cameras)), keep process 3 running, and add
@@ -250,6 +251,11 @@ uvicorn services.api.main:app --reload     # http://127.0.0.1:8000  (docs at /do
   (video parts and gaps), verification and reason; rejected ones only with
   `?include_rejected=true`. `WS /queries/{id}/progress` sends `{state, results}` at once and
   after every change, and closes when the query is done.
+- Query history (step 4.6): `GET /queries?limit=&offset=&q=` lists the queries newest first with
+  their counts (`{items, total}`), with `q` only those whose question has every word of it; `POST /queries/{id}/rerun` asks the stored request again as a
+  new query, with times like "today" read again now (`202`); `DELETE /queries/{id}` removes the
+  query with its results and their playback manifests (`204`). Footage, analysis and keyframes
+  stay. Queries are kept until they are deleted (no clean-up before Phase 6).
 - `GET /keyframes/{id}/image`: `307` to a keyframe picture (result thumbnails)
 
 ## Run a worker
@@ -555,7 +561,11 @@ The UI follows the Sentinel prototype (dark theme). What works so far:
   reason on hover); rejected ones leave the list, and results it didn't check are listed under
   "Not verified" (with the local model nothing is verified, ADR 0029). The evidence player plays
   a result's parts in order and shows "5 minutes 12 seconds not shown" between separated parts,
-  with a bar of the parts and gaps. The query id stays in the URL (`?q=…`).
+  with a bar of the parts and gaps. The query id stays in the URL (`?q=…`), and coming back to
+  Investigate reopens the last query opened in this browser (**New search** empties the page).
+  **Recent searches** lists every query, newest first, with its status and counts, and has a
+  search box (every typed word in the question, any order). Open one to see its stored results without searching again, **Run again** to ask it again now, or delete
+  it with its results. Everyone using the UI sees the same list (no login yet).
 
 The other screens are placeholders that say which phase builds them.
 

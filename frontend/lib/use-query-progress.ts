@@ -1,11 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api } from "./api";
+import { ApiError, api } from "./api";
 import type { QuerySnapshot } from "./types";
 
 /** How often to ask for the state when the WebSocket can't be used. */
 export const POLL_MS = 2_000;
+
+/** The error when the query doesn't exist: deleted (step 4.6) or a wrong link. */
+export const QUERY_GONE = "This search doesn't exist any more: it was deleted.";
 
 const finished = (snapshot: QuerySnapshot | null) =>
   snapshot !== null && (snapshot.state.status === "done" || snapshot.state.status === "failed");
@@ -48,6 +51,10 @@ export function useQueryProgress(queryId: string | null): {
         show({ state, results });
       } catch (e) {
         if (stopped) return;
+        if (e instanceof ApiError && e.status === 404) {
+          setError(QUERY_GONE);
+          return;
+        }
         setError((e as Error).message);
       }
       if (!finished(latest)) timer = setTimeout(poll, POLL_MS);
@@ -65,7 +72,7 @@ export function useQueryProgress(queryId: string | null): {
       };
       socket.onclose = (event) => {
         if (stopped) return;
-        if (event.code === 4404) setError("This query doesn't exist (any more).");
+        if (event.code === 4404) setError(QUERY_GONE);
         else if (!finished(latest)) void poll();
       };
     }

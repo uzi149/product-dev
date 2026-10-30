@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { localInputToIso } from "@/lib/format";
 import { browserTimeZone } from "@/lib/queries";
+import { useHydrated } from "@/lib/use-hydrated";
 import type { QueryInput, Understood } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -18,6 +19,8 @@ import { cn } from "@/lib/utils";
  */
 export function QueryForm({ busy, onSubmit }: { busy: boolean; onSubmit: (input: QueryInput) => void }) {
   const cameras = useQuery({ queryKey: ["cameras"], queryFn: api.cameras });
+  // The sidebar may have loaded the cameras before this part hydrates; the server had none.
+  const hydrated = useHydrated();
   const [text, setText] = useState("");
   const [chosen, setChosen] = useState<string[]>([]);
   const [from, setFrom] = useState("");
@@ -68,7 +71,7 @@ export function QueryForm({ busy, onSubmit }: { busy: boolean; onSubmit: (input:
             >
               All
             </Button>
-            {cameras.data?.map((camera) => (
+            {hydrated && cameras.data?.map((camera) => (
               <Button
                 key={camera.id}
                 type="button"

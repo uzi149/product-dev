@@ -142,6 +142,20 @@ export function barWidths(entries: PlaylistEntry[]): number[] {
   );
 }
 
+/** A history line's status: "Waiting", "Running", "Failed", or what was found (step 4.6). */
+export function historyStatus(state: QueryState): string {
+  if (state.status === "pending") return "Waiting";
+  if (state.status === "running") return "Running";
+  if (state.status === "failed") return "Failed";
+  const { verified, possible, unverifiable } = state.counts;
+  const unchecked = possible + unverifiable;
+  if (verified + unchecked === 0) return "No matches";
+  if (state.verification !== "on") return plural(unchecked, "possible match", "possible matches");
+  return [verified && `${verified} verified`, unchecked && `${unchecked} possible`]
+    .filter(Boolean)
+    .join(", ");
+}
+
 /** "14:20:51" in local time. */
 export function clock(iso: string): string {
   return new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" });

@@ -7,7 +7,8 @@
     done
 
 Every change is committed, then announced on Redis, so the UI can show candidates quickly and
-add verified results as they come. Runs on its own worker: `-Q query` (ADR 0028).
+add verified results as they come. Runs on its own worker: `-Q query` (ADR 0028). A query
+deleted while it runs (step 4.6) stops quietly at its next write or verification.
 """
 
 import logging
@@ -16,7 +17,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from services.query_engine import progress
@@ -47,6 +48,14 @@ from shared.storage import StorageClient, StorageError, get_storage
 log = logging.getLogger(__name__)
 
 SEARCHING, CANDIDATES, VERIFYING, DONE = "searching", "candidates", "verifying", "done"
+
+
+class QueryDeleted(Exception):
+    """The query was deleted while it ran (DELETE /queries/{id})."""
+
+
+def _exists(session: Session, query_id: UUID) -> bool:
+    return session.scalar(select(QuerySession.id).where(QuerySession.id == query_id)) is not None
 
 
 @dataclass
@@ -148,8 +157,11 @@ def process_query(query_id: UUID, tools: Tools | None = None) -> None:
         try:
             _run(session, query, tools, settings)
         except Exception as error:
-            log.exception("query %s failed", query_id)
             session.rollback()
+            if isinstance(error, QueryDeleted) or not _exists(session, query_id):
+                log.info("query %s was deleted while running; stopped", query_id)
+                return
+            log.exception("query %s failed", query_id)
             query = session.get(QuerySession, query_id)
             query.status, query.stage = QueryStatus.FAILED, DONE
             query.error = str(error)[:1000] or type(error).__name__
@@ -185,6 +197,8 @@ def _run(session: Session, query: QuerySession, tools: Tools, settings: Settings
         tools.publish(query.id)
         vlm = tools.vlm()
         for result, row in to_verify:
+            if not _exists(session, query.id):
+                raise QueryDeleted(query.id)  # don't ask the VLM for a query that is gone
             status, confidence, reason = _check(vlm, session, tools, settings, result, query)
             _set_verdict(session, row, status, confidence, reason)
             session.commit()
