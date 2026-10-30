@@ -251,8 +251,8 @@ uvicorn services.api.main:app --reload     # http://127.0.0.1:8000  (docs at /do
   (video parts and gaps), verification and reason; rejected ones only with
   `?include_rejected=true`. `WS /queries/{id}/progress` sends `{state, results}` at once and
   after every change, and closes when the query is done.
-- Query history (step 4.6): `GET /queries?limit=&offset=` lists the queries newest first with
-  their counts (`{items, total}`); `POST /queries/{id}/rerun` asks the stored request again as a
+- Query history (step 4.6): `GET /queries?limit=&offset=&q=` lists the queries newest first with
+  their counts (`{items, total}`), with `q` only those whose question has every word of it; `POST /queries/{id}/rerun` asks the stored request again as a
   new query, with times like "today" read again now (`202`); `DELETE /queries/{id}` removes the
   query with its results and their playback manifests (`204`). Footage, analysis and keyframes
   stay. Queries are kept until they are deleted (no clean-up before Phase 6).
@@ -563,8 +563,8 @@ The UI follows the Sentinel prototype (dark theme). What works so far:
   a result's parts in order and shows "5 minutes 12 seconds not shown" between separated parts,
   with a bar of the parts and gaps. The query id stays in the URL (`?q=…`), and coming back to
   Investigate reopens the last query opened in this browser (**New search** empties the page).
-  **Recent searches** lists every query, newest first, with its status and counts: open one to
-  see its stored results without searching again, **Run again** to ask it again now, or delete
+  **Recent searches** lists every query, newest first, with its status and counts, and has a
+  search box (every typed word in the question, any order). Open one to see its stored results without searching again, **Run again** to ask it again now, or delete
   it with its results. Everyone using the UI sees the same list (no login yet).
 
 The other screens are placeholders that say which phase builds them.

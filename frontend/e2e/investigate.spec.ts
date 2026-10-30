@@ -166,3 +166,32 @@ test("Run again opens a new query; deleting a search removes it and clears the p
   await expect(page).toHaveURL(/\/investigate$/);
   await expect(page.getByLabel("Understood")).toHaveCount(0);
 });
+
+test("the recent searches can be searched, and Show more loads the next page", async ({ page }) => {
+  const tag = unique();
+  execFileSync(E2E_PYTHON, ["-m", "tests.e2e_db", "seed-history", `${tag} parking lot`, "25"], { cwd: ROOT });
+  execFileSync(E2E_PYTHON, ["-m", "tests.e2e_db", "seed-history", `${tag} front door`, "1"], { cwd: ROOT });
+
+  await page.goto("/investigate");
+  const history = page.getByRole("region", { name: "Recent searches" });
+  const box = history.getByRole("searchbox", { name: "Search the recent searches" });
+  const lines = history.getByRole("listitem");
+
+  // Every word, in any order and any case.
+  await box.fill(`LOT ${tag}`);
+  await expect(history.getByRole("button", { name: /^Recent searches/ })).toContainText("(25 matching)");
+  await expect(lines).toHaveCount(20);
+  await expect(lines.first()).toContainText(`${tag} parking lot 25`); // newest first
+  await history.getByRole("button", { name: "Show more" }).click();
+  await expect(lines).toHaveCount(25);
+  await expect(lines.last()).toContainText(`${tag} parking lot 01`);
+  await expect(history.getByRole("button", { name: "Show more" })).toHaveCount(0);
+
+  await box.fill(`door ${tag}`);
+  await expect(lines).toHaveCount(1);
+  await expect(lines.first()).toContainText(`${tag} front door 01`);
+
+  await box.fill(`${tag} bicycle`);
+  await expect(lines).toHaveCount(0);
+  await expect(history).toContainText(`No searches with`);
+});

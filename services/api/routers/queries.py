@@ -193,16 +193,29 @@ def create_query(
     return _create(session, queue, body)
 
 
+def _like_escape(word: str) -> str:
+    """A typed word matched literally: % and _ are not wildcards."""
+    return word.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 @router.get("", response_model=QueryList)
 def list_queries(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    q: str | None = Query(
+        None, max_length=200, description="only questions containing every word (any order, case)"
+    ),
     session: Session = Depends(get_session),
 ) -> QueryList:
-    """Query history, newest first (ADR 0031)."""
+    """Query history, newest first (ADR 0031); `total` counts the matching queries."""
+    matching = [
+        QuerySession.query_text.ilike(f"%{_like_escape(word)}%", escape="\\")
+        for word in (q or "").split()
+    ]
     queries = list(
         session.scalars(
             select(QuerySession)
+            .where(*matching)
             .order_by(QuerySession.created_at.desc(), QuerySession.id.desc())
             .limit(limit)
             .offset(offset)
@@ -217,7 +230,7 @@ def list_queries(
         )
         for query_id, status, count in rows:
             statuses[query_id][status] = count
-    total = session.scalar(select(func.count()).select_from(QuerySession)) or 0
+    total = session.scalar(select(func.count()).select_from(QuerySession).where(*matching)) or 0
     return QueryList(items=[query_state(session, q, statuses[q.id]) for q in queries], total=total)
 
 

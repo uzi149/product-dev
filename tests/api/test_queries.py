@@ -272,6 +272,24 @@ def test_the_history_lists_the_newest_first_with_counts(client, queries_queued, 
     assert client.get("/queries", params={"limit": 0}).status_code == 422
 
 
+def test_the_history_can_be_searched_by_words_of_the_question(client, queries_queued):
+    for text in ("a red car parks", "a person walks", "the CAR leaves", "100% sure_thing"):
+        post(client, text)
+
+    def found(q):
+        history = client.get("/queries", params={"q": q}).json()
+        return sorted(item["query_text"] for item in history["items"]), history["total"]
+
+    assert found("car") == (["a red car parks", "the CAR leaves"], 2)  # any case
+    assert found("parks  car") == (["a red car parks"], 1)  # every word, any order
+    assert found("bicycle") == ([], 0)
+    assert found("100%") == (["100% sure_thing"], 1)
+    assert found("_") == (["100% sure_thing"], 1)  # % and _ are plain characters
+    assert found("   ")[1] == 4  # blank: everything
+    page = client.get("/queries", params={"q": "e", "limit": 1, "offset": 1}).json()
+    assert page["total"] == 4 and len(page["items"]) == 1  # "e" is in every question
+
+
 def test_an_old_query_without_its_request_is_rebuilt_from_the_text(
     client, queries_queued, finished
 ):

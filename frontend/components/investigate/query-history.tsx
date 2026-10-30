@@ -1,10 +1,11 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, RotateCw, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { ChevronDown, RotateCw, Search, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -23,13 +24,16 @@ import { cn } from "@/lib/utils";
 export const HISTORY_PAGE = 20;
 /** While a listed query is still waiting or running, the list refreshes this often. */
 const REFRESH_MS = 3_000;
+/** Typing in the search box waits this long before asking the API. */
+const TYPING_MS = 300;
 
 const unfinished = (q: QueryState) => q.status === "pending" || q.status === "running";
 
 /**
  * Recent searches (step 4.6, ADR 0031): newest first, shared by everyone using the UI. Opening one
- * shows its stored results; Run again asks it again; Delete removes it with its results.
- * Collapsed while a query is open, open when none is.
+ * shows its stored results; Run again asks it again; Delete removes it with its results. The
+ * search box keeps the questions with every typed word (filtered by the API, over the whole
+ * history). Collapsed while a query is open, open when none is.
  */
 export function QueryHistory({
   openId,
@@ -44,7 +48,12 @@ export function QueryHistory({
   rerunning: boolean;
   onDeleted: (id: string) => void;
 }) {
-  const [limit, setLimit] = useState(HISTORY_PAGE);
+  const [typed, setTyped] = useState("");
+  const [search, setSearch] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setSearch(typed.trim()), TYPING_MS);
+    return () => clearTimeout(timer);
+  }, [typed]);
   const [expanded, setExpanded] = useState(!openId);
   const [shownFor, setShownFor] = useState(openId);
   if (shownFor !== openId) {
@@ -52,14 +61,23 @@ export function QueryHistory({
     setExpanded(!openId);
   }
   const [deleting, setDeleting] = useState<QueryState | null>(null);
-  const history = useQuery({
-    queryKey: ["queries", limit],
-    queryFn: () => api.queries(limit),
+  // Show more loads the next page (offset), so no request asks for more than one page.
+  const history = useInfiniteQuery({
+    queryKey: ["queries", search],
+    queryFn: ({ pageParam }) => api.queries({ limit: HISTORY_PAGE, offset: pageParam, q: search }),
+    initialPageParam: 0,
+    getNextPageParam: (last, pages) => {
+      const loaded = pages.reduce((n, page) => n + page.items.length, 0);
+      return loaded < last.total ? loaded : undefined;
+    },
     placeholderData: (previous) => previous,
-    refetchInterval: (query) => (query.state.data?.items.some(unfinished) ? REFRESH_MS : false),
+    refetchInterval: (query) =>
+      query.state.data?.pages.some((page) => page.items.some(unfinished)) ? REFRESH_MS : false,
   });
-  const items = history.data?.items ?? [];
-  const total = history.data?.total ?? 0;
+  // A query asked while paging can appear on two pages for a moment: list it once.
+  const items = [...new Map((history.data?.pages ?? []).flatMap((p) => p.items).map((q) => [q.id, q])).values()];
+  const total = history.data?.pages[0]?.total ?? 0;
+  const count = search ? `${total} matching` : String(total);
 
   return (
     <section aria-label="Recent searches" className="rounded-2xl border bg-card">
@@ -70,10 +88,22 @@ export function QueryHistory({
         className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-semibold"
       >
         <ChevronDown className={cn("size-3.5 transition-transform", !expanded && "-rotate-90")} />
-        Recent searches{history.data ? ` (${total})` : ""}
+        Recent searches{history.data ? ` (${count})` : ""}
       </button>
       {expanded && (
         <div className="grid gap-1 border-t px-2 py-2">
+          <div className="relative px-1 pb-1">
+            <Search className="pointer-events-none absolute top-1/2 left-3.5 size-3.5 -translate-y-[calc(50%+2px)] text-muted-foreground" />
+            <Input
+              type="search"
+              aria-label="Search the recent searches"
+              placeholder="Search the recent searches"
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+              maxLength={200}
+              className="h-8 pl-8 text-sm"
+            />
+          </div>
           {history.isPending && <p className="px-2 text-sm text-muted-foreground">Loading…</p>}
           {history.isError && (
             <p role="alert" className="px-2 text-sm text-destructive">
@@ -81,7 +111,15 @@ export function QueryHistory({
             </p>
           )}
           {history.data && items.length === 0 && (
-            <p className="px-2 py-1 text-sm text-muted-foreground">No searches yet.</p>
+            <p className="px-2 py-1 text-sm text-muted-foreground">
+              {search ? (
+                <>
+                  No searches with <q>{search}</q>.
+                </>
+              ) : (
+                "No searches yet."
+              )}
+            </p>
           )}
           {items.length > 0 && (
             <ul className="grid gap-0.5">
@@ -129,16 +167,16 @@ export function QueryHistory({
               ))}
             </ul>
           )}
-          {items.length < total && (
+          {history.hasNextPage && (
             <Button
               type="button"
               size="sm"
               variant="ghost"
               className="justify-self-start"
-              disabled={history.isFetching}
-              onClick={() => setLimit((l) => l + HISTORY_PAGE)}
+              disabled={history.isFetchingNextPage}
+              onClick={() => history.fetchNextPage()}
             >
-              Show more
+              {history.isFetchingNextPage ? "Loading…" : "Show more"}
             </Button>
           )}
         </div>

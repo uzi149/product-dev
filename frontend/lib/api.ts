@@ -98,9 +98,12 @@ export const api = {
     ),
   createQuery: (input: QueryInput) => request<QueryState>("/queries", json("POST", input)),
   query: (id: string) => request<QueryState>(`/queries/${id}`),
-  /** Query history, newest first (step 4.6). */
-  queries: (limit: number) =>
-    request<QueryList>(`/queries?${new URLSearchParams({ limit: String(limit) })}`),
+  /** Query history, newest first (step 4.6); `q`: only questions with every one of its words. */
+  queries: (params: { limit: number; offset: number; q?: string }) => {
+    const query = new URLSearchParams({ limit: String(params.limit), offset: String(params.offset) });
+    if (params.q?.trim()) query.set("q", params.q.trim());
+    return request<QueryList>(`/queries?${query}`);
+  },
   /** Asks the stored question again as a new query, relative times read now (HTTP 202). */
   rerunQuery: (id: string) => request<QueryState>(`/queries/${id}/rerun`, { method: "POST" }),
   /** Deletes the query with its results, for good (HTTP 204). */
