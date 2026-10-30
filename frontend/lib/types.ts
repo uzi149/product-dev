@@ -169,6 +169,14 @@ export interface QueryState {
   created_at: string;
   finished_at: string | null;
   counts: QueryCounts;
+  /** The request as sent (step 4.6), for Run again and removing a chip. */
+  request: Required<QueryInput>;
+}
+
+/** Query history, newest first (step 4.6). */
+export interface QueryList {
+  items: QueryState[];
+  total: number;
 }
 
 export interface VideoPart {

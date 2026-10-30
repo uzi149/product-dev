@@ -177,3 +177,42 @@ def test_a_finished_query_is_not_run_again(engine, footage, make_query, make_too
     vlm = FakeVLM([YES])
     process_query(query_id, make_tools(vlm))
     assert load(engine, query_id)[1] == [] and vlm.calls == []
+
+
+def test_a_query_deleted_while_running_stops_quietly(engine, footage, make_query, make_tools):
+    """Deleted after its candidates were stored (step 4.6): no VLM call, no failed row."""
+    query_id = make_query()
+    vlm = FakeVLM([YES, YES])
+    tools = make_tools(vlm)
+    published = []
+
+    def delete_after_candidates(qid):
+        published.append(qid)
+        if len(published) == 2:  # searching, candidates
+            with Session(engine) as s:
+                s.delete(s.get(QuerySession, qid))
+                s.commit()
+
+    tools.publish = delete_after_candidates
+    process_query(query_id, tools)
+    query, rows = load(engine, query_id)
+    assert query is None and rows == [] and vlm.calls == []
+
+
+def test_a_query_deleted_during_verification_stops_quietly(engine, footage, make_query, make_tools):
+    query_id = make_query()
+    vlm = FakeVLM([YES, YES])
+    tools = make_tools(vlm)
+    published = []
+
+    def delete_after_first_verdict(qid):
+        published.append(qid)
+        if len(published) == 4:  # searching, candidates, verifying, first verdict
+            with Session(engine) as s:
+                s.delete(s.get(QuerySession, qid))
+                s.commit()
+
+    tools.publish = delete_after_first_verdict
+    process_query(query_id, tools)
+    query, _ = load(engine, query_id)
+    assert query is None and len(vlm.calls) == 1  # the second result isn't sent to the VLM

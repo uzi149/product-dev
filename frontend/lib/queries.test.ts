@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { barWidths, evidenceBadge, gapWording, playlist, shownMs, splitResults, stageLines } from "./queries";
+import {
+  barWidths,
+  evidenceBadge,
+  gapWording,
+  historyStatus,
+  playlist,
+  shownMs,
+  splitResults,
+  stageLines,
+} from "./queries";
 import type { EvidenceItem, PlaybackManifest, QueryState } from "./types";
 
 const MANIFEST: PlaybackManifest = {
@@ -46,6 +55,15 @@ function state(overrides: Partial<QueryState> = {}): QueryState {
     created_at: "2026-03-07T14:30:00Z",
     finished_at: null,
     counts: { candidates: 0, to_verify: 0, verified: 0, rejected: 0, unverifiable: 0, possible: 0 },
+    request: {
+      query_text: "a bag",
+      camera_ids: null,
+      start: null,
+      end: null,
+      timezone: "UTC",
+      parse_cameras: true,
+      parse_times: true,
+    },
     ...overrides,
   };
 }
@@ -155,5 +173,25 @@ describe("playlist", () => {
     expect(widths.reduce((a, b) => a + b, 0)).toBeCloseTo(100);
     expect(widths[1]).toBeCloseTo(12);
     expect(widths[0] / widths[2]).toBeCloseTo(57 / 29);
+  });
+});
+
+describe("historyStatus", () => {
+  const counts = (c: Partial<QueryState["counts"]>) => ({ ...state().counts, ...c });
+  it("says how far the query got", () => {
+    expect(historyStatus(state({ status: "pending" }))).toBe("Waiting");
+    expect(historyStatus(state({ status: "running" }))).toBe("Running");
+    expect(historyStatus(state({ status: "failed" }))).toBe("Failed");
+  });
+  it("counts what a finished query shows, leaving out the rejected results", () => {
+    const done = (c: Partial<QueryState["counts"]>, verification: QueryState["verification"] = "on") =>
+      historyStatus(state({ status: "done", verification, counts: counts(c) }));
+    expect(done({ verified: 2, possible: 1 })).toBe("2 verified, 1 possible");
+    expect(done({ verified: 1, rejected: 2 })).toBe("1 verified");
+    expect(done({ possible: 1, unverifiable: 1 })).toBe("2 possible");
+    expect(done({ rejected: 3 })).toBe("No matches");
+    expect(done({})).toBe("No matches");
+    expect(done({ possible: 1 }, "skipped")).toBe("1 possible match");
+    expect(done({ possible: 3 }, "skipped")).toBe("3 possible matches");
   });
 });

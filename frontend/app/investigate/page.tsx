@@ -1,17 +1,21 @@
 "use client";
 
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Plus, RotateCw } from "lucide-react";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { EvidencePlayer } from "@/components/investigate/evidence-player";
 import { ProgressStages } from "@/components/investigate/progress-stages";
 import { QueryForm, UnderstoodChips } from "@/components/investigate/query-form";
+import { QueryHistory } from "@/components/investigate/query-history";
 import { ResultCard } from "@/components/investigate/result-card";
 import { PageHeader } from "@/components/page-header";
+import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
+import { readLastQuery, writeLastQuery } from "@/lib/last-query";
 import { splitResults } from "@/lib/queries";
-import type { QueryInput, Understood } from "@/lib/types";
-import { useQueryProgress } from "@/lib/use-query-progress";
+import type { QueryInput, QueryState, Understood } from "@/lib/types";
+import { QUERY_GONE, useQueryProgress } from "@/lib/use-query-progress";
 
 /** A query still pending after this long means no query worker is taking it. */
 const NO_WORKER_MS = 10_000;
@@ -26,22 +30,51 @@ export default function InvestigatePage() {
 }
 
 function InvestigateView() {
-  // The query id is kept in the URL (?q=…), so a reload or a shared link shows the same results.
+  // The open query is kept in the URL (?q=…), so a reload or a shared link shows the same results.
+  // Without it, the last query opened in this browser comes back (step 4.6).
   const requested = useSearchParams().get("q");
-  const [created, setCreated] = useState<string | null>(null);
-  const queryId = created ?? requested;
-  const [lastInput, setLastInput] = useState<QueryInput | null>(null);
+  const [queryId, setQueryId] = useState<string | null>(requested);
+  const [seenRequested, setSeenRequested] = useState(requested);
+  if (requested !== seenRequested) {
+    setSeenRequested(requested);
+    if (requested) setQueryId(requested);
+  }
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const queryClient = useQueryClient();
 
-  const create = useMutation({
-    mutationFn: (input: QueryInput) => api.createQuery(input),
-    onSuccess: (state, input) => {
-      setLastInput(input);
-      setCreated(state.id);
-      setSelectedId(null);
-      window.history.replaceState(null, "", `?${new URLSearchParams({ q: state.id })}`);
+  // The browser's storage is read after the first render, so the server's HTML still matches.
+  const restored = useRef(false);
+  useEffect(() => {
+    if (!restored.current) {
+      restored.current = true;
+      const last = readLastQuery();
+      if (!requested && last) {
+        // Putting it in the URL opens it (above), like a link with ?q.
+        window.history.replaceState(null, "", `?${new URLSearchParams({ q: last })}`);
+        return;
+      }
+    }
+    // Also when a link opened the page without ?q (the sidebar) while a query is open.
+    if (requested !== queryId) {
+      const url = queryId ? `?${new URLSearchParams({ q: queryId })}` : window.location.pathname;
+      window.history.replaceState(null, "", url);
+    }
+    writeLastQuery(queryId);
+  }, [queryId, requested]);
+
+  function open(id: string | null) {
+    setQueryId(id);
+    setSelectedId(null);
+  }
+
+  const opened = {
+    onSuccess: (state: QueryState) => {
+      open(state.id);
+      queryClient.invalidateQueries({ queryKey: ["queries"] });
     },
-  });
+  };
+  const create = useMutation({ mutationFn: (input: QueryInput) => api.createQuery(input), ...opened });
+  const rerun = useMutation({ mutationFn: (id: string) => api.rerunQuery(id), ...opened });
   const { snapshot, error } = useQueryProgress(queryId);
   const state = snapshot?.state;
   const results = snapshot?.results ?? [];
@@ -58,13 +91,20 @@ function InvestigateView() {
   }, [pending]);
   const noWorker = pending && now - new Date(state.created_at).getTime() > NO_WORKER_MS;
 
+  // The history shows each query's status: refresh it when the open one finishes.
+  const status = state?.status;
+  useEffect(() => {
+    if (status === "done" || status === "failed") queryClient.invalidateQueries({ queryKey: ["queries"] });
+  }, [status, queryClient]);
+
   function removeChip(kind: Understood["kind"]) {
-    if (!lastInput) return;
+    if (!state) return;
     create.mutate({
-      ...lastInput,
+      ...state.request,
       ...(kind === "camera" ? { parse_cameras: false } : { parse_times: false }),
     });
   }
+  const failure = create.error ?? rerun.error;
 
   return (
     <>
@@ -75,26 +115,55 @@ function InvestigateView() {
       />
       <div className="grid gap-4">
         <QueryForm busy={create.isPending} onSubmit={(input) => create.mutate(input)} />
-        {create.isError && (
+        {failure && (
           <p role="alert" className="text-sm text-destructive">
-            {create.error.message}
+            {failure.message}
           </p>
         )}
+        <QueryHistory
+          openId={queryId}
+          onOpen={open}
+          onRerun={(id) => rerun.mutate(id)}
+          rerunning={rerun.isPending}
+          onDeleted={(id) => id === queryId && open(null)}
+        />
 
         {queryId && !state && !error && <p className="text-sm text-muted-foreground">Loading the query…</p>}
         {error && (
-          <p role="alert" className="text-sm text-destructive">
-            {error}
+          <p
+            role={error === QUERY_GONE ? undefined : "alert"}
+            className={error === QUERY_GONE ? "text-sm text-muted-foreground" : "text-sm text-destructive"}
+          >
+            {error}{" "}
+            <button type="button" className="underline" onClick={() => open(null)}>
+              New search
+            </button>
           </p>
         )}
 
         {state && (
           <>
-            <UnderstoodChips
-              understood={state.understood}
-              searchText={state.search_text}
-              onRemove={lastInput ? removeChip : undefined}
-            />
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <UnderstoodChips
+                understood={state.understood}
+                searchText={state.search_text}
+                onRemove={removeChip}
+              />
+              <div className="ml-auto flex gap-1.5">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={rerun.isPending}
+                  onClick={() => rerun.mutate(state.id)}
+                >
+                  <RotateCw /> {rerun.isPending ? "Asking again…" : "Run again"}
+                </Button>
+                <Button type="button" size="sm" variant="outline" onClick={() => open(null)}>
+                  <Plus /> New search
+                </Button>
+              </div>
+            </div>
             <ProgressStages state={state} />
             {noWorker && (
               <p role="alert" className="text-sm text-orange">

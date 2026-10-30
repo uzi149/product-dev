@@ -384,10 +384,14 @@ class EventEvidence(Base):
 
 class QuerySession(Base):
     """One plain-English query and its progress (steps 4.1-4.4). `stage` is what the UI shows:
-    searching, candidates, verifying, done; `verification` is "on" or "skipped" (local VLM)."""
+    searching, candidates, verifying, done; `verification` is "on" or "skipped" (local VLM).
+    `request_json` is the request as sent, for Run again (4.6); none before migration 0007."""
 
     __tablename__ = "query_sessions"
-    __table_args__ = (_one_of("status", QueryStatus, "status"),)
+    __table_args__ = (
+        _one_of("status", QueryStatus, "status"),
+        Index("ix_query_sessions_created_at", "created_at"),
+    )
 
     id: Mapped[uuid.UUID] = _uuid_pk()
     query_text: Mapped[str] = mapped_column(Text)
@@ -403,6 +407,7 @@ class QuerySession(Base):
     verification: Mapped[str | None] = mapped_column(String(10))
     error: Mapped[str | None] = mapped_column(Text)
     finished_at: Mapped[datetime | None] = _timestamp(nullable=True)
+    request_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
     results: Mapped[list["QueryResult"]] = relationship(
         back_populates="session", cascade="all, delete-orphan", passive_deletes=True

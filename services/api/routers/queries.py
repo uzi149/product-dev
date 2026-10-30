@@ -1,15 +1,25 @@
 """Plain-English queries (scope §10, step 4.4).
 
 POST reads the cameras and times out of the text (4.1) at once, stores the query and queues it
-for the query worker (ADR 0028); GET and the WebSocket show its progress and results.
+for the query worker (ADR 0028); GET and the WebSocket show its progress and results. The history
+(step 4.6, ADR 0031): the list newest first, Run again, and delete with everything the query made.
 """
 
+from collections import Counter
 from datetime import UTC, datetime
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
-from sqlalchemy import select
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    Response,
+    WebSocket,
+    WebSocketDisconnect,
+)
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
@@ -23,6 +33,7 @@ from shared.schemas.query import (
     PlaybackManifest,
     QueryCounts,
     QueryCreate,
+    QueryList,
     QueryState,
     UnderstoodItem,
 )
@@ -41,22 +52,37 @@ def _get_query(session: Session, query_id: UUID) -> QuerySession:
     return query
 
 
-def query_state(session: Session, query: QuerySession) -> QueryState:
-    statuses = list(
-        session.scalars(
-            select(QueryEvidence.status).where(QueryEvidence.query_session_id == query.id)
-        )
-    )
-    counts = QueryCounts(
-        candidates=len(statuses),
-        to_verify=min(get_settings().query_verify_top, len(statuses))
+def _counts(query: QuerySession, statuses: Counter) -> QueryCounts:
+    candidates = sum(statuses.values())
+    return QueryCounts(
+        candidates=candidates,
+        to_verify=min(get_settings().query_verify_top, candidates)
         if query.verification == "on"
         else 0,
-        verified=statuses.count(EvidenceStatus.VERIFIED),
-        rejected=statuses.count(EvidenceStatus.REJECTED),
-        unverifiable=statuses.count(EvidenceStatus.UNVERIFIABLE),
-        possible=statuses.count(EvidenceStatus.POSSIBLE),
+        verified=statuses[EvidenceStatus.VERIFIED],
+        rejected=statuses[EvidenceStatus.REJECTED],
+        unverifiable=statuses[EvidenceStatus.UNVERIFIABLE],
+        possible=statuses[EvidenceStatus.POSSIBLE],
     )
+
+
+def stored_request(query: QuerySession) -> QueryCreate:
+    """The request as sent. Queries stored before migration 0007 kept only the question and the
+    time zone, so everything else is read from the text again."""
+    if query.request_json:
+        return QueryCreate.model_validate(query.request_json)
+    return QueryCreate(query_text=query.query_text, timezone=query.timezone or "UTC")
+
+
+def query_state(
+    session: Session, query: QuerySession, statuses: Counter | None = None
+) -> QueryState:
+    if statuses is None:
+        statuses = Counter(
+            session.scalars(
+                select(QueryEvidence.status).where(QueryEvidence.query_session_id == query.id)
+            )
+        )
     return QueryState(
         id=query.id,
         query_text=query.query_text,
@@ -71,7 +97,8 @@ def query_state(session: Session, query: QuerySession) -> QueryState:
         error=query.error,
         created_at=query.created_at,
         finished_at=query.finished_at,
-        counts=counts,
+        counts=_counts(query, statuses),
+        request=stored_request(query),
     )
 
 
@@ -106,12 +133,7 @@ def query_results(
     ]
 
 
-@router.post("", response_model=QueryState, status_code=202)
-def create_query(
-    body: QueryCreate,
-    session: Session = Depends(get_session),
-    queue=Depends(get_query_queue),
-) -> QueryState:
+def _create(session: Session, queue, body: QueryCreate) -> QueryState:
     """Read the filters out of the text, store the query and queue it (scope §10 step 1)."""
     cameras = [CameraRef(c.id, c.display_name) for c in session.scalars(select(Camera))]
     if body.camera_ids:
@@ -146,6 +168,7 @@ def create_query(
         start_filter=parsed.start,
         end_filter=parsed.end,
         timezone=body.timezone,
+        request_json=body.model_dump(mode="json"),
         status=QueryStatus.PENDING,
     )
     session.add(query)
@@ -159,6 +182,69 @@ def create_query(
         raise HTTPException(503, f"the query queue is not reachable (is Redis running?): {error}")
     session.refresh(query)
     return query_state(session, query)
+
+
+@router.post("", response_model=QueryState, status_code=202)
+def create_query(
+    body: QueryCreate,
+    session: Session = Depends(get_session),
+    queue=Depends(get_query_queue),
+) -> QueryState:
+    return _create(session, queue, body)
+
+
+@router.get("", response_model=QueryList)
+def list_queries(
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    session: Session = Depends(get_session),
+) -> QueryList:
+    """Query history, newest first (ADR 0031)."""
+    queries = list(
+        session.scalars(
+            select(QuerySession)
+            .order_by(QuerySession.created_at.desc(), QuerySession.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+    )
+    statuses: dict[UUID, Counter] = {q.id: Counter() for q in queries}
+    if queries:
+        rows = session.execute(
+            select(QueryEvidence.query_session_id, QueryEvidence.status, func.count())
+            .where(QueryEvidence.query_session_id.in_(statuses))
+            .group_by(QueryEvidence.query_session_id, QueryEvidence.status)
+        )
+        for query_id, status, count in rows:
+            statuses[query_id][status] = count
+    total = session.scalar(select(func.count()).select_from(QuerySession)) or 0
+    return QueryList(items=[query_state(session, q, statuses[q.id]) for q in queries], total=total)
+
+
+@router.post("/{query_id}/rerun", response_model=QueryState, status_code=202)
+def rerun_query(
+    query_id: UUID,
+    session: Session = Depends(get_session),
+    queue=Depends(get_query_queue),
+) -> QueryState:
+    """Ask the stored request again as a new query: relative times ("today") are read now, chosen
+    cameras and From/To are kept (ADR 0031). The old query stays as it was."""
+    return _create(session, queue, stored_request(_get_query(session, query_id)))
+
+
+@router.delete("/{query_id}", status_code=204)
+def delete_query(
+    query_id: UUID,
+    session: Session = Depends(get_session),
+    events: QueryEvents = Depends(get_query_events),
+) -> Response:
+    """The query and everything it created: its results (query_evidence) and window rows
+    (query_results), by the database's cascade. Footage, windows and keyframes stay. A running
+    query stops at its next step; open progress sockets close with 4404 (ADR 0031)."""
+    session.delete(_get_query(session, query_id))
+    session.commit()
+    events.notify(query_id)
+    return Response(status_code=204)
 
 
 @router.get("/{query_id}", response_model=QueryState)

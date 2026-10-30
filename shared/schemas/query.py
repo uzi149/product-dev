@@ -98,6 +98,16 @@ class QueryState(BaseModel):
     created_at: datetime
     finished_at: datetime | None
     counts: QueryCounts
+    # The request as sent, for Run again and removing a chip (4.6); rebuilt from the question
+    # and time zone for queries stored before it was kept.
+    request: QueryCreate
+
+
+class QueryList(BaseModel):
+    """Query history (step 4.6), newest first."""
+
+    items: list[QueryState]
+    total: int
 
 
 class EvidenceItem(BaseModel):
