@@ -65,6 +65,14 @@ class EventStatus(enum.StrEnum):
     DISMISSED = "dismissed"
 
 
+class CompileStatus(enum.StrEnum):
+    """A trigger's rule compiled into structured criteria (step 5.1, ADR 0032)."""
+
+    PENDING = "pending"
+    DONE = "done"
+    FAILED = "failed"
+
+
 class QueryStatus(enum.StrEnum):
     PENDING = "pending"
     RUNNING = "running"
@@ -304,7 +312,11 @@ class TextEmbedding(Base):
 
 
 class Trigger(Base):
+    """A rule in plain English and the cameras it watches. `compiled_rule_json` is what the VLM
+    made of the rule (step 5.1); it can't be enabled until `compile_status` is done (ADR 0032)."""
+
     __tablename__ = "triggers"
+    __table_args__ = (_one_of("compile_status", CompileStatus, "compile_status"),)
 
     id: Mapped[uuid.UUID] = _uuid_pk()
     name: Mapped[str] = mapped_column(String(200))
@@ -316,6 +328,11 @@ class Trigger(Base):
     post_roll_seconds: Mapped[int] = mapped_column(Integer, server_default=text("20"))
     enabled: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     created_at: Mapped[datetime] = _created_at()
+    compile_status: Mapped[str] = mapped_column(
+        String(20), server_default=CompileStatus.PENDING.value
+    )
+    compile_error: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = _created_at()
 
     cameras: Mapped[list[Camera]] = relationship(secondary="trigger_cameras")
 
