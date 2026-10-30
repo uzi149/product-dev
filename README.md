@@ -96,7 +96,7 @@ docker compose up -d                                                     # if no
 
 uvicorn services.api.main:app --reload --host 127.0.0.1 --port 8000      # 1. API on :8000
 celery -A shared.jobs.celery_app worker --pool=solo -Q default,analysis  # 2. uploads + analysis
-celery -A shared.jobs.celery_app worker --pool=solo -Q query -n query@%h  # 3. queries (Investigate)
+celery -A shared.jobs.celery_app worker --pool=solo -Q query -n query@%h  # 3. queries, trigger rules
 python -m services.ingestion                                             # 4. live RTSP cameras (optional)
 cd frontend; npm run dev                                                 # 5. UI on :3000
 ```
@@ -257,6 +257,15 @@ uvicorn services.api.main:app --reload     # http://127.0.0.1:8000  (docs at /do
   query with its results and their playback manifests (`204`). Footage, analysis and keyframes
   stay. Queries are kept until they are deleted (no clean-up before Phase 6).
 - `GET /keyframes/{id}/image`: `307` to a keyframe picture (result thumbnails)
+- Triggers (step 5.1): `POST /triggers` (`name`, `natural_language_rule`, `camera_ids`, optional
+  `minimum_confidence` 0.8, `cooldown_seconds` 120, `pre_roll_seconds` 10, `post_roll_seconds`
+  20) stores the trigger **disabled** and has the query worker compile the rule with the VLM
+  (text only) into structured criteria (`compiled`: the action sequence, entity classes, the
+  gap between actions, whether the VLM verifies a match, and `mode` `structured`, or `semantic`
+  when the rule names no vocabulary action). `GET /triggers`, `GET/PATCH/DELETE /triggers/{id}`
+  (a new wording compiles again and disables the trigger; delete also deletes its events),
+  `POST /triggers/{id}/compile` (again, after a failure), `/enable` (only once `compile_status`
+  is `done`, ADR 0032) and `/disable`.
 
 ## Run a worker
 
@@ -281,7 +290,8 @@ celery -A shared.jobs.celery_app worker --pool=solo -Q query -n query@%h
 ```
 
 It loads the embedding models on its first query (about 40 s, 2 GB) and keeps them for every
-later one. Without it, queries stay `pending`.
+later one. It also compiles trigger rules (step 5.1, text only, seconds with OpenRouter).
+Without it, queries stay `pending` and new triggers stay "Compiling".
 
 Camera source URIs are encrypted with `FERNET_KEY` and never returned by the API. The key in
 `.env.example` is a **shared development key**: generate a private one
