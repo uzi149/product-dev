@@ -30,29 +30,3 @@ export function PageHeader({
     </div>
   );
 }
-
-export function ComingSoon({
-  eyebrow,
-  title,
-  description,
-  phase,
-}: {
-  eyebrow: string;
-  title: string;
-  description: string;
-  phase: string;
-}) {
-  return (
-    <>
-      <PageHeader eyebrow={eyebrow} title={title} description={description} />
-      <div className="grid min-h-[260px] place-items-center rounded-2xl border border-dashed text-center">
-        <div>
-          <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-green">
-            Not built yet
-          </div>
-          <p className="mt-2 text-sm text-muted-foreground">This screen is built in {phase}.</p>
-        </div>
-      </div>
-    </>
-  );
-}

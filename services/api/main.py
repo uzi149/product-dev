@@ -13,6 +13,7 @@ from services.api.routers import (
     live,
     queries,
     segments,
+    settings,
     static_periods,
     triggers,
     videos,
@@ -48,6 +49,7 @@ def create_app() -> FastAPI:
         triggers,
         events,
         live,
+        settings,
     ):
         app.include_router(module.router)
     return app

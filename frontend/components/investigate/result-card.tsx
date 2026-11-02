@@ -16,7 +16,8 @@ const TONE: Record<BadgeTone, string> = {
   rejected: "border-red/45 bg-red/15 text-red",
 };
 
-function Thumbnail({ keyframeId }: { keyframeId: string | null }) {
+/** A keyframe picture, or a placeholder when there is none (or it was removed). */
+export function Thumbnail({ keyframeId }: { keyframeId: string | null }) {
   const [failed, setFailed] = useState(false);
   if (!keyframeId || failed) {
     return (

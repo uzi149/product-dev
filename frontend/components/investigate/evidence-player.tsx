@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { barWidths, clock, gapWording, playlist } from "@/lib/queries";
-import type { EvidenceItem } from "@/lib/types";
+import type { PlaybackManifest } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 /** How long the "… not shown" card stays before the next part plays. */
@@ -13,9 +13,10 @@ export const GAP_CARD_MS = 2_000;
 
 /**
  * Plays a result's parts in order (scope §11). A part that follows a gap is announced with a
- * "5 minutes 12 seconds not shown" card, so separated footage never looks continuous.
+ * "5 minutes 12 seconds not shown" card, so separated footage never looks continuous. Plays a
+ * query result, an event (5.3) or a trigger test's match (5.4): anything with a manifest.
  */
-export function EvidencePlayer({ result }: { result: EvidenceItem }) {
+export function EvidencePlayer({ result }: { result: { manifest: PlaybackManifest } }) {
   const entries = useMemo(() => playlist(result.manifest), [result.manifest]);
   const widths = useMemo(() => barWidths(entries), [entries]);
   const videoCount = entries.filter((e) => e.kind === "video").length;
