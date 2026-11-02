@@ -42,12 +42,25 @@ _LEAD_IN = re.compile(
 )
 
 
+# "within 2 minutes": the rule's gap, not something to see. The model doesn't always leave it out.
+_TIME_LIMIT = re.compile(
+    r"\s*\b(?:within|in under|in less than|inside(?: of)?)\s+"
+    r"(?:\d+(?:\.\d+)?|a|an|one|two|three|four|five|ten|thirty|a few)\s*"
+    r"(?:seconds?|secs?|s|minutes?|mins?|hours?|hrs?)\b",
+    re.IGNORECASE,
+)
+
+
 class InvalidRule(Exception):
     """The model's answer can't be used."""
 
 
+def without_time_limit(text: str) -> str:
+    return re.sub(r"\s{2,}", " ", _TIME_LIMIT.sub("", text)).strip(" ,.") or text.strip()
+
+
 def plain_search_text(rule: str) -> str:
-    return _LEAD_IN.sub("", rule).strip().rstrip(".") or rule.strip()
+    return without_time_limit(_LEAD_IN.sub("", rule).strip().rstrip(".")) or rule.strip()
 
 
 def _action_word(value: Any) -> str | None:
@@ -64,6 +77,12 @@ def _entity(value: Any) -> str | None:
     return word if word in ENTITY_CLASSES else entity_class(value)
 
 
+def _sequence(raw: list) -> list[str]:
+    actions = [a for a in map(_action_word, raw) if a]
+    # The same word twice in a row is one step ("walk, walk").
+    return [a for i, a in enumerate(actions) if i == 0 or a != actions[i - 1]]
+
+
 def _unique(values: list[str]) -> list[str]:
     return list(dict.fromkeys(values))
 
@@ -75,9 +94,15 @@ def read_rule(text: str, rule: str, model: str | None) -> CompiledRule:
     raw_actions = data.get("required_action_sequence")
     if not isinstance(raw_actions, list):
         raise InvalidRule("'required_action_sequence' must be a list")
-    actions = [a for a in map(_action_word, raw_actions) if a]
-    # The same word twice in a row is one step ("walk, walk").
-    actions = [a for i, a in enumerate(actions) if i == 0 or a != actions[i - 1]]
+    actions = _sequence(raw_actions)
+    alternatives = []
+    raw_alternatives = data.get("alternative_action_sequences")
+    for raw in raw_alternatives if isinstance(raw_alternatives, list) else []:
+        sequence = _sequence(raw) if isinstance(raw, list) else []
+        if sequence and sequence != actions and sequence not in alternatives:
+            alternatives.append(sequence)
+    if not actions and alternatives:
+        actions = alternatives.pop(0)
     raw_entities = data.get("required_entities")
     entities = _unique(
         [e for e in map(_entity, raw_entities if isinstance(raw_entities, list) else []) if e]
@@ -95,9 +120,10 @@ def read_rule(text: str, rule: str, model: str | None) -> CompiledRule:
         mode="structured" if actions else "semantic",
         required_entities=entities,
         required_action_sequence=actions,
+        alternative_action_sequences=alternatives,
         maximum_sequence_gap_seconds=min(MAX_GAP_SECONDS, max(MIN_GAP_SECONDS, gap)),
         requires_vlm_verification=bool(verify),
-        search_text=(search or plain_search_text(rule))[:500],
+        search_text=(without_time_limit(search) if search else plain_search_text(rule))[:500],
         source_rule=rule,
         prompt_version=compile_prompt.PROMPT_VERSION,
         model=model,

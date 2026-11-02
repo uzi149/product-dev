@@ -28,6 +28,9 @@ def test_the_scopes_example_rule_is_a_sequence(vlm):
     ), actions
     assert "person" in rule.required_entities
     assert rule.requires_vlm_verification
+    # Either way of describing it is covered: the two steps or the single action.
+    flat = [a for s in rule.action_sequences for a in s]
+    assert "leave_object_behind" in flat and "place_object" in flat, rule.action_sequences
 
 
 def test_a_rule_without_vocabulary_actions_is_semantic(vlm):

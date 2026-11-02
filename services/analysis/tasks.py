@@ -7,6 +7,9 @@ id, so a retried or repeated task carries on where it stopped and never duplicat
 
 Temporary trouble (VLM unavailable, MinIO or PostgreSQL down) retries the task, after 30 s,
 2 min and 10 min. A used-up quota or a rejected request fails the remaining windows at once.
+
+Every finished window is then checked against its camera's triggers (step 5.2, ADR 0033); that
+never fails the window.
 """
 
 import logging
@@ -26,6 +29,8 @@ from sqlalchemy.orm import Session
 from services.analysis.observations import describe_window, index_text
 from services.analysis.prompts import PROMPT_VERSION
 from services.analysis.windows import Window, keyframe_id, keyframe_times, plan_windows, window_id
+from services.triggers.evaluate import TriggerTools, evaluate_window
+from services.triggers.events import FinishTools, default_finish_tools
 from shared.config import Settings, get_settings
 from shared.database.index_settings import IndexSettingsMismatch, ensure_index_settings
 from shared.database.models import (
@@ -75,6 +80,8 @@ class Models:
     vlm: VisionLanguageModel
     text: TextEmbedder
     image: ImageEmbedder
+    # Holding and alerting trigger events (5.2); None: Redis and Celery (tests pass fakes).
+    finish: FinishTools | None = None
 
 
 def default_models() -> Models:
@@ -305,6 +312,28 @@ def _analyse_window(
         reply.completion_tokens,
         observation.summary,
     )
+    _evaluate_triggers(session, storage, settings, models, wid)
+
+
+def _evaluate_triggers(
+    session: Session,
+    storage: StorageClient,
+    settings: Settings,
+    models: Models,
+    wid: UUID,
+) -> None:
+    """Live trigger evaluation of a finished window (step 5.2); an error is logged, never
+    raised, so the window stays analysed."""
+    if not settings.triggers_enabled:
+        return
+    try:
+        if models.finish is None:
+            models.finish = default_finish_tools(settings)
+        tools = TriggerTools(storage, models.vlm, models.text, models.image, models.finish)
+        evaluate_window(session, wid, tools)
+    except Exception:
+        session.rollback()
+        log.exception("trigger evaluation of window %s failed", wid)
 
 
 def _fail_unfinished(

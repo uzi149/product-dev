@@ -350,6 +350,10 @@ class TriggerCamera(Base):
 
 
 class Event(Base):
+    """What a trigger reported (step 5.2, ADR 0033). Held while `alerted_at` is empty: the alert
+    waits until the footage up to the post-roll is stored. `details_json` holds the mode, the
+    matched windows and actions, the verification and the alert delay."""
+
     __tablename__ = "events"
     __table_args__ = (
         _one_of("status", EventStatus, "status"),
@@ -368,6 +372,9 @@ class Event(Base):
     summary: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), server_default=EventStatus.NEW.value)
     created_at: Mapped[datetime] = _created_at()
+    details_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    alerted_at: Mapped[datetime | None] = _timestamp(nullable=True)
+    updated_at: Mapped[datetime] = _created_at()
 
     evidence: Mapped[list["EventEvidence"]] = relationship(
         back_populates="event",

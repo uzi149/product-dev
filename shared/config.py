@@ -148,6 +148,16 @@ class Settings(BaseSettings):
     query_verify_frames: int = Field(default=12, gt=0)
     query_verify_min_confidence: float = Field(default=0.6, ge=0, le=1)
 
+    # Live trigger evaluation (step 5.2, ADR 0033): every analysed window is checked against the
+    # enabled triggers of its camera. Semantic rules match at this hybrid score or more. A match
+    # is held until the footage up to its post-roll is stored: checked every
+    # TRIGGER_FINISH_POLL_SECONDS, at most max_segment_seconds + TRIGGER_FINISH_MARGIN_SECONDS
+    # after the post-roll.
+    triggers_enabled: bool = True
+    trigger_semantic_min_score: float = Field(default=0.6, ge=0, le=1)
+    trigger_finish_poll_seconds: int = Field(default=10, gt=0)
+    trigger_finish_margin_seconds: int = Field(default=30, ge=0)
+
     # MVP plan §2
     keyframes_per_window: int = Field(default=6, gt=0)
     default_retention_days: int = Field(default=14, gt=0)

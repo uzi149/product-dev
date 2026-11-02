@@ -2,8 +2,10 @@
 compiled rule (ADR 0032).
 
 The compiled rule is what live evaluation (5.2) and testing (5.4) check: `structured` rules need
-their actions in order within the gap; `semantic` rules (no vocabulary action) are matched by
-similarity to `search_text`.
+their actions in order within the gap, as `required_action_sequence` or any of the
+`alternative_action_sequences` (other ways the analysis may describe the same event, e.g.
+`leave_object_behind` for "places an object and leaves"); `semantic` rules (no vocabulary action)
+are matched by similarity to `search_text`.
 """
 
 from datetime import datetime
@@ -22,6 +24,7 @@ class CompiledRule(BaseModel):
     mode: Literal["structured", "semantic"]
     required_entities: list[EntityClass] = Field(default_factory=list)
     required_action_sequence: list[str] = Field(default_factory=list)
+    alternative_action_sequences: list[list[str]] = Field(default_factory=list)
     maximum_sequence_gap_seconds: int = Field(
         default=DEFAULT_GAP_SECONDS, ge=MIN_GAP_SECONDS, le=MAX_GAP_SECONDS
     )
@@ -41,6 +44,18 @@ class CompiledRule(BaseModel):
         if unknown:
             raise ValueError(f"not in the action vocabulary: {', '.join(unknown)}")
         return value
+
+    @field_validator("alternative_action_sequences")
+    @classmethod
+    def _known_alternatives(cls, value: list[list[str]]) -> list[list[str]]:
+        for sequence in value:
+            cls._known_actions(sequence)
+        return value
+
+    @property
+    def action_sequences(self) -> list[list[str]]:
+        """Every sequence that satisfies the rule: the required one first."""
+        return [s for s in [self.required_action_sequence, *self.alternative_action_sequences] if s]
 
 
 class _TriggerSettings(BaseModel):
