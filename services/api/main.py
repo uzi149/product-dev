@@ -9,6 +9,7 @@ from services.api.routers import (
     cameras,
     health,
     keyframes,
+    live,
     queries,
     segments,
     static_periods,
@@ -44,6 +45,7 @@ def create_app() -> FastAPI:
         queries,
         keyframes,
         triggers,
+        live,
     ):
         app.include_router(module.router)
     return app

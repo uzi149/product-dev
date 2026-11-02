@@ -13,7 +13,9 @@ from shared.schemas.entities import ENTITY_CLASSES
 from shared.schemas.observation import ACTION_VOCABULARY
 from shared.schemas.trigger import DEFAULT_GAP_SECONDS, MAX_GAP_SECONDS, MIN_GAP_SECONDS
 
-PROMPT_VERSION = 1
+# 2: alternative action sequences (the analysis may say leave_object_behind instead of
+# place_object then leave).
+PROMPT_VERSION = 2
 MAX_ANSWER_TOKENS = 400
 
 SYSTEM_PROMPT = (
@@ -28,6 +30,7 @@ EXAMPLES = [
         {
             "required_entities": ["person", "portable_object"],
             "required_action_sequence": ["place_object", "leave"],
+            "alternative_action_sequences": [["leave_object_behind"]],
             "maximum_sequence_gap_seconds": 30,
             "requires_vlm_verification": True,
             "search_text": "someone places an object and leaves it behind",
@@ -38,6 +41,7 @@ EXAMPLES = [
         {
             "required_entities": ["person"],
             "required_action_sequence": [],
+            "alternative_action_sequences": [],
             "maximum_sequence_gap_seconds": 30,
             "requires_vlm_verification": True,
             "search_text": "a crowd gathers near the entrance",
@@ -51,6 +55,9 @@ _FIELDS = f"""\
 - required_action_sequence: the action words the rule needs, in the order they must happen,
   only from the action words below. Use an empty list when the rule describes a state or a
   scene rather than actions the words cover.
+- alternative_action_sequences: other action sequences, from the same action words, that
+  describe the same event in different words (a camera description may say one action where
+  the rule names two, or the reverse); an empty list if there are none.
 - maximum_sequence_gap_seconds: the most seconds allowed between one action and the next
   ({MIN_GAP_SECONDS} to {MAX_GAP_SECONDS}); use the rule's own time if it gives one ("within 2
   minutes" is 120), otherwise {DEFAULT_GAP_SECONDS}.

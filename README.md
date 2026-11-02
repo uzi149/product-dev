@@ -260,12 +260,16 @@ uvicorn services.api.main:app --reload     # http://127.0.0.1:8000  (docs at /do
 - Triggers (step 5.1): `POST /triggers` (`name`, `natural_language_rule`, `camera_ids`, optional
   `minimum_confidence` 0.8, `cooldown_seconds` 120, `pre_roll_seconds` 10, `post_roll_seconds`
   20) stores the trigger **disabled** and has the query worker compile the rule with the VLM
-  (text only) into structured criteria (`compiled`: the action sequence, entity classes, the
+  (text only) into structured criteria (`compiled`: the action sequence and alternative sequences
+  that describe the same event in other words, entity classes, the
   gap between actions, whether the VLM verifies a match, and `mode` `structured`, or `semantic`
   when the rule names no vocabulary action). `GET /triggers`, `GET/PATCH/DELETE /triggers/{id}`
   (a new wording compiles again and disables the trigger; delete also deletes its events),
   `POST /triggers/{id}/compile` (again, after a failure), `/enable` (only once `compile_status`
   is `done`, ADR 0032) and `/disable`.
+- `WS /live/events` (step 5.2): sends every new event as JSON once its evidence is stored
+  (`event_id`, `trigger_name`, `camera_name`, `start_time`, `end_time`, `confidence`, `summary`,
+  `verification`); nothing old on connect.
 
 ## Run a worker
 
@@ -421,6 +425,27 @@ its keyframes to OpenRouter, so test videos only). On start, an analysis worker 
 `pending` segments of the last 24 h (`ANALYSIS_SWEEP_HOURS`). `ANALYSIS_ENABLED=false` turns
 automatic analysis off (ADR 0022): new segments stay `pending` until requeued. The e2e stack runs
 with analysis off.
+
+## Triggers
+
+Every analysed window is checked right away against the enabled triggers **of its own camera**
+(step 5.2, ADR 0033), uploads included; a trigger assigned to CAM-01 is never even loaded for
+CAM-02. A structured rule needs its actions in order within its gap (across earlier windows of
+the camera, the last action in the new window) and its entity classes; a semantic rule needs the
+window's search score for the rule (as on Investigate) to reach `TRIGGER_SEMANTIC_MIN_SCORE`
+(0.6). When the rule asks for it, the VLM verifies the match on the stored keyframes: rejected
+makes no event; with the local model, or when the VLM fails, the event is created anyway and
+marked "not verified" / "couldn't be verified". The confidence is the verification's, else the
+lowest window's, and must reach the trigger's minimum. The same trigger on the same camera within
+its cooldown extends the event instead of making a new one.
+
+An event is **held** until the footage up to its post-roll is stored, then its evidence (the
+segments from the pre-roll to the post-roll) is written and the alert goes out on
+`WS /live/events`. For an upload that is at once; for a live camera when a segment reaching the
+end of the post-roll is stored, the camera stops recording, or at the latest
+`max_segment_seconds` + 30 s later (a check every 10 s by the `default` worker). On this laptop
+an alert comes about 60–90 s after the action (ADR 0033). `TRIGGERS_ENABLED=false` turns
+evaluation off.
 
 ## Search
 

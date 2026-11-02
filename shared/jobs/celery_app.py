@@ -30,6 +30,7 @@ INGEST_UPLOAD = "ingestion.ingest_upload"
 ANALYZE_SEGMENT = "analysis.analyze_segment"
 RUN_QUERY = "query.run_query"
 COMPILE_TRIGGER = "triggers.compile_trigger"
+FINISH_EVENT = "triggers.finish_event"
 
 celery_app = Celery(
     "sentinel",
@@ -39,6 +40,7 @@ celery_app = Celery(
         "services.analysis.tasks",
         "services.query_engine.run",
         "services.triggers.compile",
+        "services.triggers.events",
     ],
 )
 celery_app.conf.update(
@@ -49,6 +51,8 @@ celery_app.conf.update(
         RUN_QUERY: {"queue": QUERY_QUEUE},
         # Text only, but the local model must not load in the API (ADR 0032).
         COMPILE_TRIGGER: {"queue": QUERY_QUEUE},
+        # Short database work: an event's evidence and alert once its post-roll is stored.
+        FINISH_EVENT: {"queue": DEFAULT_QUEUE},
     },
     task_serializer="json",
     accept_content=["json"],

@@ -157,3 +157,16 @@ def test_trigger_compilation_migration_downgrades_on_its_own(migrated_db, alembi
     finally:
         engine.dispose()
     command.upgrade(alembic_config, "head")
+
+
+def test_event_details_migration_downgrades_on_its_own(migrated_db, alembic_config):
+    command.downgrade(alembic_config, "0008")
+    engine = create_engine(migrated_db)
+    try:
+        with engine.connect() as conn:
+            columns = {c["name"] for c in inspect(conn).get_columns("events")}
+        assert "alerted_at" not in columns and "details_json" not in columns
+        assert "summary" in columns
+    finally:
+        engine.dispose()
+    command.upgrade(alembic_config, "head")

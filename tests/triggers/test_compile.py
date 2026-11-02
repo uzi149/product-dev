@@ -41,6 +41,38 @@ def test_a_rule_with_actions_is_structured():
     assert rule.prompt_version == compile_prompt.PROMPT_VERSION
 
 
+def test_alternative_sequences_are_kept_cleaned():
+    answer = {
+        "required_entities": ["person", "bag"],
+        "required_action_sequence": ["place_object", "leave"],
+        "alternative_action_sequences": [
+            ["Leave Object Behind"],
+            ["place_object", "leave"],  # the same as the required one
+            ["dance"],  # nothing left
+            "leave_object_behind",  # not a list
+            ["leave_object_behind"],  # a repeat
+        ],
+    }
+    rule = read_rule(json.dumps(answer), RULE, None)
+    assert rule.alternative_action_sequences == [["leave_object_behind"]]
+    assert rule.action_sequences == [["place_object", "leave"], ["leave_object_behind"]]
+
+
+def test_an_alternative_becomes_the_sequence_when_the_required_one_is_empty():
+    answer = {"required_action_sequence": ["dance"], "alternative_action_sequences": [["fall"]]}
+    rule = read_rule(json.dumps(answer), "Report when someone falls", None)
+    assert rule.mode == "structured"
+    assert rule.required_action_sequence == ["fall"] and rule.alternative_action_sequences == []
+
+
+def test_a_rule_compiled_before_alternatives_reads_as_none():
+    from shared.schemas.trigger import CompiledRule
+
+    old = read_rule(LEFT_BEHIND, RULE, None).model_dump()
+    del old["alternative_action_sequences"]
+    assert CompiledRule.model_validate(old).alternative_action_sequences == []
+
+
 def test_unknown_actions_are_dropped_and_none_left_is_semantic():
     answer = {
         "required_entities": ["person"],
@@ -92,6 +124,20 @@ def test_unusable_answers_are_refused(text, problem):
 )
 def test_lead_in_words_are_left_out_of_the_search_text(rule, plain):
     assert plain_search_text(rule) == plain
+
+
+@pytest.mark.parametrize(
+    ("search", "plain"),
+    [
+        ("a vehicle arrives and then leaves within 2 minutes", "a vehicle arrives and then leaves"),
+        ("someone loiters in under 30 s near the door", "someone loiters near the door"),
+        ("a bag is left within a few minutes.", "a bag is left"),
+        ("a person waits inside the shop", "a person waits inside the shop"),  # not a time
+    ],
+)
+def test_a_time_limit_is_left_out_of_the_search_text(search, plain):
+    answer = {"required_action_sequence": ["loiter"], "search_text": search}
+    assert read_rule(json.dumps(answer), "Report when …", None).search_text == plain
 
 
 def test_the_prompt_has_the_rule_the_vocabulary_and_the_classes():

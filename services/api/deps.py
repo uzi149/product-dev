@@ -4,6 +4,7 @@ from uuid import UUID
 import redis
 
 from services.query_engine.progress import QueryEvents
+from services.triggers.notices import EventNotices
 from shared.camera_status import get_redis as _get_redis
 from shared.database.session import get_session
 from shared.jobs import celery_app as jobs
@@ -41,6 +42,11 @@ def get_query_events() -> QueryEvents:
     return QueryEvents()
 
 
+def get_event_notices() -> EventNotices:
+    """Live event notices (Redis pub/sub, step 5.2); tests replace it."""
+    return EventNotices()
+
+
 def get_redis() -> redis.Redis:
     """Live camera status (written by `python -m services.ingestion`); tests replace it."""
     return _get_redis()
@@ -48,6 +54,7 @@ def get_redis() -> redis.Redis:
 
 __all__ = [
     "get_analysis_queue",
+    "get_event_notices",
     "get_query_events",
     "get_query_queue",
     "get_redis",

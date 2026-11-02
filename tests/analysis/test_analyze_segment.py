@@ -297,3 +297,101 @@ def test_the_sweep_does_nothing_when_analysis_is_off(engine, make_segment, analy
     settings = Settings(_env_file=None, analysis_enabled=False)
     assert sweep(lambda: Session(engine), settings) == 0
     assert analysis_queue == []
+
+
+# Live trigger evaluation after each window (step 5.2, ADR 0033)
+
+
+class _NoFinish:
+    """Finish tools that record the notices instead of using Redis and Celery."""
+
+    def __init__(self):
+        from services.triggers.events import FinishTools
+
+        self.notices = []
+        self.tools = FinishTools(
+            settings=Settings(_env_file=None),
+            publish=self.notices.append,
+            schedule_finish=lambda event_id, seconds: None,
+            camera_status=lambda camera_id: None,
+        )
+
+
+@pytest.fixture
+def left_behind_trigger(session, camera):
+    from shared.database.models import Trigger
+
+    trigger = Trigger(
+        name="Object left behind",
+        natural_language_rule="Report when someone places an object and leaves it behind",
+        compiled_rule_json={
+            "mode": "structured",
+            "required_entities": ["person", "portable_object"],
+            "required_action_sequence": ["place_object", "leave"],
+            "maximum_sequence_gap_seconds": 30,
+            "requires_vlm_verification": False,
+            "search_text": "someone places an object and leaves it behind",
+            "source_rule": "Report when someone places an object and leaves it behind",
+            "prompt_version": 1,
+        },
+        compile_status="done",
+        enabled=True,
+    )
+    trigger.cameras = [camera]
+    session.add(trigger)
+    session.commit()
+    return trigger
+
+
+def _analyse(engine, storage, segment, settings, finish):
+    models = Models(FakeVLM([GOOD]), FakeTextEmbedder(), FakeImageEmbedder(), finish.tools)
+    process_segment(
+        segment.id,
+        session_factory=lambda: Session(engine),
+        storage=storage,
+        settings=settings,
+        models=models,
+    )
+
+
+def test_each_analysed_window_is_checked_against_the_cameras_triggers(
+    session, engine, storage, make_segment, video_30s, left_behind_trigger
+):
+    from shared.database.models import Event
+
+    segment = make_segment(video_30s)
+    finish = _NoFinish()
+    _analyse(engine, storage, segment, Settings(_env_file=None), finish)
+    assert status(session, segment) == "done"
+    # Every window shows the example's place_object and leave: one event, extended by the
+    # windows after the first (within the 120 s cooldown), and one alert.
+    events = session.scalars(select(Event)).all()
+    assert len(events) == 1 and events[0].trigger_id == left_behind_trigger.id
+    assert len(finish.notices) == 1
+
+
+def test_trigger_evaluation_can_be_switched_off(
+    session, engine, storage, make_segment, video_30s, left_behind_trigger
+):
+    from shared.database.models import Event
+
+    segment = make_segment(video_30s)
+    _analyse(
+        engine, storage, segment, Settings(_env_file=None, triggers_enabled=False), _NoFinish()
+    )
+    assert status(session, segment) == "done" and count(session, Event) == 0
+
+
+def test_a_failing_evaluation_never_fails_the_window(
+    session, engine, storage, make_segment, video_30s, left_behind_trigger, monkeypatch
+):
+    from services.analysis import tasks
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("evaluation bug (test)")
+
+    monkeypatch.setattr(tasks, "evaluate_window", broken)
+    segment = make_segment(video_30s)
+    _analyse(engine, storage, segment, Settings(_env_file=None), _NoFinish())
+    assert status(session, segment) == "done"
+    assert all(w.processing_status == "done" for w in windows(session, segment))
