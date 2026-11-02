@@ -14,7 +14,8 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from services.api.deps import get_session, get_trigger_queue
+from services.api.deps import get_session, get_storage_client, get_trigger_queue
+from services.api.routers.events import delete_events
 from shared.database.models import (
     Camera,
     CompileStatus,
@@ -31,6 +32,7 @@ from shared.schemas.trigger import (
     TriggerUpdate,
 )
 from shared.schemas.trigger import TriggerCamera as TriggerCameraRead
+from shared.storage import StorageClient
 
 router = APIRouter(prefix="/triggers", tags=["triggers"])
 
@@ -226,12 +228,18 @@ def disable_trigger(trigger_id: UUID, session: Session = Depends(get_session)) -
 
 
 @router.delete("/{trigger_id}", status_code=204)
-def delete_trigger(trigger_id: UUID, session: Session = Depends(get_session)) -> Response:
-    """The trigger, its camera assignments and its events with their evidence rows (ADR 0034).
-    The events go first: `events.trigger_id` has no delete rule. Their footage is no longer
-    protected afterwards."""
+def delete_trigger(
+    trigger_id: UUID,
+    session: Session = Depends(get_session),
+    storage: StorageClient = Depends(get_storage_client),
+) -> Response:
+    """The trigger, its camera assignments and its events with their evidence rows and export
+    files (ADR 0034). The events go first: `events.trigger_id` has no delete rule. Their footage
+    is no longer protected afterwards."""
     trigger = _get_trigger(session, trigger_id)
-    session.execute(delete(Event).where(Event.trigger_id == trigger.id))
+    events = list(session.scalars(select(Event).where(Event.trigger_id == trigger.id)))
+    delete_events(session, storage, events)
+    session.flush()
     session.execute(delete(TriggerCamera).where(TriggerCamera.trigger_id == trigger.id))
     session.delete(trigger)
     session.commit()

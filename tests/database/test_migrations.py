@@ -170,3 +170,16 @@ def test_event_details_migration_downgrades_on_its_own(migrated_db, alembic_conf
     finally:
         engine.dispose()
     command.upgrade(alembic_config, "head")
+
+
+def test_event_review_migration_downgrades_on_its_own(migrated_db, alembic_config):
+    command.downgrade(alembic_config, "0009")
+    engine = create_engine(migrated_db)
+    try:
+        with engine.connect() as conn:
+            columns = {c["name"] for c in inspect(conn).get_columns("events")}
+        assert "export_status" not in columns and "note" not in columns
+        assert "alerted_at" in columns
+    finally:
+        engine.dispose()
+    command.upgrade(alembic_config, "head")

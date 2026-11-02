@@ -31,6 +31,7 @@ ANALYZE_SEGMENT = "analysis.analyze_segment"
 RUN_QUERY = "query.run_query"
 COMPILE_TRIGGER = "triggers.compile_trigger"
 FINISH_EVENT = "triggers.finish_event"
+EXPORT_EVENT = "events.export_event"
 
 celery_app = Celery(
     "sentinel",
@@ -41,6 +42,7 @@ celery_app = Celery(
         "services.query_engine.run",
         "services.triggers.compile",
         "services.triggers.events",
+        "services.events.export",
     ],
 )
 celery_app.conf.update(
@@ -53,6 +55,8 @@ celery_app.conf.update(
         COMPILE_TRIGGER: {"queue": QUERY_QUEUE},
         # Short database work: an event's evidence and alert once its post-roll is stored.
         FINISH_EVENT: {"queue": DEFAULT_QUEUE},
+        # FFmpeg work on one event's evidence (step 5.3).
+        EXPORT_EVENT: {"queue": DEFAULT_QUEUE},
     },
     task_serializer="json",
     accept_content=["json"],
@@ -77,6 +81,11 @@ def queue_run_query(query_id: UUID) -> None:
 def queue_compile_trigger(trigger_id: UUID) -> None:
     """Raises when the broker (Redis) can't be reached."""
     celery_app.send_task(COMPILE_TRIGGER, args=[str(trigger_id)])
+
+
+def queue_export_event(event_id: UUID) -> None:
+    """Raises when the broker (Redis) can't be reached."""
+    celery_app.send_task(EXPORT_EVENT, args=[str(event_id)])
 
 
 def queue_ingest_upload(upload_id: UUID) -> None:

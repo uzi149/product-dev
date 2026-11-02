@@ -270,6 +270,16 @@ uvicorn services.api.main:app --reload     # http://127.0.0.1:8000  (docs at /do
 - `WS /live/events` (step 5.2): sends every new event as JSON once its evidence is stored
   (`event_id`, `trigger_name`, `camera_name`, `start_time`, `end_time`, `confidence`, `summary`,
   `verification`); nothing old on connect.
+- Events (step 5.3): `GET /events` (alerted events, the latest alert first; filters `status`,
+  `camera_id`, `trigger_id`, `start`/`end` on the footage time, `limit`, `offset`;
+  `{items, total}`), `GET /events/counts`, `GET /events/{id}` (with its playback manifest:
+  the evidence parts and explicit gaps, like a query result), `POST /events/{id}/acknowledge`
+  (`{status: confirmed | dismissed | new, note?}`), `DELETE /events/{id}` (with its evidence rows
+  and export file; the footage stays). `POST /events/{id}/export` joins the evidence into one
+  MP4 in the background (the `default` worker, FFmpeg): parts at one size, a 2 s card
+  "5 minutes 12 seconds not shown" between separated parts; `GET /events/{id}/export` gives its
+  status and, when done, a download link. An export is made again only after the event was
+  extended.
 
 ## Run a worker
 

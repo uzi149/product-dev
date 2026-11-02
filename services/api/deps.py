@@ -42,6 +42,11 @@ def get_query_events() -> QueryEvents:
     return QueryEvents()
 
 
+def get_export_queue() -> Callable[[UUID], None]:
+    """Queues the export of an event's evidence as one MP4 (step 5.3); tests replace it."""
+    return jobs.queue_export_event
+
+
 def get_event_notices() -> EventNotices:
     """Live event notices (Redis pub/sub, step 5.2); tests replace it."""
     return EventNotices()
@@ -55,6 +60,7 @@ def get_redis() -> redis.Redis:
 __all__ = [
     "get_analysis_queue",
     "get_event_notices",
+    "get_export_queue",
     "get_query_events",
     "get_query_queue",
     "get_redis",

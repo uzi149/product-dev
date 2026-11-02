@@ -73,6 +73,15 @@ class CompileStatus(enum.StrEnum):
     FAILED = "failed"
 
 
+class ExportStatus(enum.StrEnum):
+    """An event's evidence joined into one MP4 on request (step 5.3)."""
+
+    NONE = "none"
+    RUNNING = "running"
+    DONE = "done"
+    FAILED = "failed"
+
+
 class QueryStatus(enum.StrEnum):
     PENDING = "pending"
     RUNNING = "running"
@@ -352,11 +361,15 @@ class TriggerCamera(Base):
 class Event(Base):
     """What a trigger reported (step 5.2, ADR 0033). Held while `alerted_at` is empty: the alert
     waits until the footage up to the post-roll is stored. `details_json` holds the mode, the
-    matched windows and actions, the verification and the alert delay."""
+    matched windows and actions, the verification and the alert delay. `updated_at` changes when
+    the event or its evidence changes (an extension), not when it is acknowledged, so an export
+    older than it is out of date (step 5.3)."""
 
     __tablename__ = "events"
     __table_args__ = (
         _one_of("status", EventStatus, "status"),
+        _one_of("export_status", ExportStatus, "export_status"),
+        Index("ix_events_alerted_at", "alerted_at"),
         Index("ix_events_trigger_id", "trigger_id"),
         Index("ix_events_camera_id_start_time", "camera_id", "start_time"),
         Index("ix_events_end_time", "end_time"),
@@ -375,6 +388,12 @@ class Event(Base):
     details_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     alerted_at: Mapped[datetime | None] = _timestamp(nullable=True)
     updated_at: Mapped[datetime] = _created_at()
+    acknowledged_at: Mapped[datetime | None] = _timestamp(nullable=True)
+    note: Mapped[str | None] = mapped_column(Text)
+    export_status: Mapped[str] = mapped_column(String(20), server_default=ExportStatus.NONE.value)
+    export_uri: Mapped[str | None] = mapped_column(Text)
+    export_error: Mapped[str | None] = mapped_column(Text)
+    exported_at: Mapped[datetime | None] = _timestamp(nullable=True)
 
     evidence: Mapped[list["EventEvidence"]] = relationship(
         back_populates="event",
