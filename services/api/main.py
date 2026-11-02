@@ -12,6 +12,7 @@ from services.api.routers import (
     queries,
     segments,
     static_periods,
+    triggers,
     videos,
 )
 from shared.config import get_settings
@@ -34,7 +35,16 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    for module in (health, cameras, videos, segments, static_periods, queries, keyframes):
+    for module in (
+        health,
+        cameras,
+        videos,
+        segments,
+        static_periods,
+        queries,
+        keyframes,
+        triggers,
+    ):
         app.include_router(module.router)
     return app
 

@@ -145,3 +145,15 @@ def test_query_history_migration_downgrades_on_its_own(migrated_db, alembic_conf
     finally:
         engine.dispose()
     command.upgrade(alembic_config, "head")
+
+
+def test_trigger_compilation_migration_downgrades_on_its_own(migrated_db, alembic_config):
+    command.downgrade(alembic_config, "0007")
+    engine = create_engine(migrated_db)
+    try:
+        with engine.connect() as conn:
+            columns = {c["name"] for c in inspect(conn).get_columns("triggers")}
+        assert "compile_status" not in columns and "natural_language_rule" in columns
+    finally:
+        engine.dispose()
+    command.upgrade(alembic_config, "head")

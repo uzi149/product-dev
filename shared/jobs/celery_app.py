@@ -3,7 +3,7 @@
 Run a worker on Windows with:
 
     celery -A shared.jobs.celery_app worker --pool=solo -Q default,analysis
-    celery -A shared.jobs.celery_app worker --pool=solo -Q query      # queries (ADR 0028)
+    celery -A shared.jobs.celery_app worker --pool=solo -Q query      # queries, trigger rules
 
 A second worker on `-Q analysis` alone can run next to it, so a long analysis backlog never
 holds up an upload; queries have their own worker for the same reason.
@@ -29,11 +29,17 @@ QUERY_QUEUE = "query"
 INGEST_UPLOAD = "ingestion.ingest_upload"
 ANALYZE_SEGMENT = "analysis.analyze_segment"
 RUN_QUERY = "query.run_query"
+COMPILE_TRIGGER = "triggers.compile_trigger"
 
 celery_app = Celery(
     "sentinel",
     broker=get_settings().redis_url,
-    include=["services.ingestion.tasks", "services.analysis.tasks", "services.query_engine.run"],
+    include=[
+        "services.ingestion.tasks",
+        "services.analysis.tasks",
+        "services.query_engine.run",
+        "services.triggers.compile",
+    ],
 )
 celery_app.conf.update(
     task_default_queue=DEFAULT_QUEUE,
@@ -41,6 +47,8 @@ celery_app.conf.update(
         INGEST_UPLOAD: {"queue": DEFAULT_QUEUE},
         ANALYZE_SEGMENT: {"queue": ANALYSIS_QUEUE},
         RUN_QUERY: {"queue": QUERY_QUEUE},
+        # Text only, but the local model must not load in the API (ADR 0032).
+        COMPILE_TRIGGER: {"queue": QUERY_QUEUE},
     },
     task_serializer="json",
     accept_content=["json"],
@@ -60,6 +68,11 @@ celery_app.conf.update(
 def queue_run_query(query_id: UUID) -> None:
     """Raises when the broker (Redis) can't be reached."""
     celery_app.send_task(RUN_QUERY, args=[str(query_id)])
+
+
+def queue_compile_trigger(trigger_id: UUID) -> None:
+    """Raises when the broker (Redis) can't be reached."""
+    celery_app.send_task(COMPILE_TRIGGER, args=[str(trigger_id)])
 
 
 def queue_ingest_upload(upload_id: UUID) -> None:

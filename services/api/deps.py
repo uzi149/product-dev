@@ -30,6 +30,12 @@ def get_query_queue() -> Callable[[UUID], None]:
     return jobs.queue_run_query
 
 
+def get_trigger_queue() -> Callable[[UUID], None]:
+    """Queues the compilation of a trigger's rule on the query worker (ADR 0032); tests replace
+    it."""
+    return jobs.queue_compile_trigger
+
+
 def get_query_events() -> QueryEvents:
     """Progress notices of a query (Redis pub/sub); tests replace it."""
     return QueryEvents()
@@ -47,5 +53,6 @@ __all__ = [
     "get_redis",
     "get_session",
     "get_storage_client",
+    "get_trigger_queue",
     "get_upload_queue",
 ]
