@@ -37,34 +37,63 @@ def evidence_rows(session: Session, event_id: UUID) -> list[tuple[EventEvidence,
 def event_manifest(
     event: Event, rows: Sequence[tuple[EventEvidence, VideoSegment]]
 ) -> PlaybackManifest:
+    spans = [
+        (
+            segment,
+            segment.start_time + timedelta(milliseconds=evidence.start_offset_ms),
+            segment.start_time + timedelta(milliseconds=evidence.end_offset_ms),
+        )
+        for evidence, segment in rows
+    ]
+    return spans_manifest(event.id, event.camera_id, spans, event.start_time, event.end_time)
+
+
+def clipped_spans(
+    segments: Sequence[VideoSegment], begin: datetime, finish: datetime
+) -> list[tuple[VideoSegment, datetime, datetime]]:
+    """The stored segments' footage inside [begin, finish], in time order."""
+    return [
+        (s, max(begin, s.start_time), min(finish, s.end_time))
+        for s in sorted(segments, key=lambda s: s.start_time)
+        if s.end_time > begin and s.start_time < finish
+    ]
+
+
+def spans_manifest(
+    result_id: UUID,
+    camera_id: UUID,
+    spans: Sequence[tuple[VideoSegment, datetime, datetime]],
+    start: datetime,
+    end: datetime,
+) -> PlaybackManifest:
+    """(segment, start, end) spans in time order as video parts, with explicit gaps.
+    `start`/`end` are used when there is no footage at all."""
     parts: list[VideoPart | GapPart] = []
     previous_end: datetime | None = None
-    for evidence, segment in rows:
-        start = segment.start_time + timedelta(milliseconds=evidence.start_offset_ms)
-        end = segment.start_time + timedelta(milliseconds=evidence.end_offset_ms)
+    for segment, start_at, end_at in spans:
         if previous_end is not None:
-            start = max(start, previous_end)  # overlapping segments: never play twice
-        if end <= start:
+            start_at = max(start_at, previous_end)  # overlapping segments: never play twice
+        if end_at <= start_at:
             continue
-        if previous_end is not None and start - previous_end >= MIN_GAP_SHOWN:
-            parts.append(GapPart(duration_ms=_ms(start - previous_end)))
+        if previous_end is not None and start_at - previous_end >= MIN_GAP_SHOWN:
+            parts.append(GapPart(duration_ms=_ms(start_at - previous_end)))
         parts.append(
             VideoPart(
-                camera_id=event.camera_id,
+                camera_id=camera_id,
                 segment_id=segment.id,
-                source_start_ms=_ms(start - segment.start_time),
-                source_end_ms=_ms(end - segment.start_time),
-                start_time=start,
-                end_time=end,
+                source_start_ms=_ms(start_at - segment.start_time),
+                source_end_ms=_ms(end_at - segment.start_time),
+                start_time=start_at,
+                end_time=end_at,
             )
         )
-        previous_end = end
+        previous_end = end_at
     videos = [p for p in parts if isinstance(p, VideoPart)]
     return PlaybackManifest(
-        result_id=event.id,
-        camera_id=event.camera_id,
-        start_time=videos[0].start_time if videos else event.start_time,
-        end_time=videos[-1].end_time if videos else event.end_time,
+        result_id=result_id,
+        camera_id=camera_id,
+        start_time=videos[0].start_time if videos else start,
+        end_time=videos[-1].end_time if videos else end,
         parts=parts,
     )
 

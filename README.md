@@ -267,6 +267,13 @@ uvicorn services.api.main:app --reload     # http://127.0.0.1:8000  (docs at /do
   (a new wording compiles again and disables the trigger; delete also deletes its events),
   `POST /triggers/{id}/compile` (again, after a failure), `/enable` (only once `compile_status`
   is `done`, ADR 0032) and `/disable`.
+- Trigger tests (step 5.4, scope §12.4): `POST /triggers/{id}/test` with `{source: "video",
+  upload_id}` (an uploaded video's stored footage), `{source: "last_hour" | "last_24h"}` or
+  `{source: "range", start, end}` runs the trigger's current rule on stored footage on the query
+  worker and creates **no** events; `GET /triggers/{id}/tests` (latest 5) and
+  `GET /triggers/{id}/tests/{test_id}` give its stage and the would-be events: "would report",
+  "rejected" by the VLM or "below_confidence", each with its verification and a playback
+  manifest with the pre- and post-roll.
 - `WS /live/events` (step 5.2): sends every new event as JSON once its evidence is stored
   (`event_id`, `trigger_name`, `camera_name`, `start_time`, `end_time`, `confidence`, `summary`,
   `verification`); nothing old on connect.

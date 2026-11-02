@@ -149,3 +149,26 @@ def match_sequence(
 def classes_seen(windows: Iterable[WindowFacts], start: datetime, end: datetime) -> set[str]:
     """The entity classes of the windows that overlap [start, end]."""
     return {c for w in windows if w.start <= end and w.end >= start for c in w.classes}
+
+
+def match_rule(
+    windows: Sequence[WindowFacts],
+    sequences: Sequence[Sequence[str]],
+    gap_seconds: float,
+    overlap_seconds: float,
+    required_entities: Iterable[str],
+    last_in: UUID,
+) -> tuple[list[TimedAction], list[WindowFacts]] | None:
+    """A structured rule completed in window `last_in`: the first of its sequences (the required
+    one, then the alternatives) whose chain ends there with the entity classes seen; with the
+    windows it rests on."""
+    actions = timeline(windows, overlap_seconds)
+    for sequence in sequences:
+        chain = match_sequence(actions, sequence, gap_seconds, last_in)
+        if chain is None:
+            continue
+        start, end = chain[0].start, max(a.end for a in chain)
+        if not set(required_entities) <= classes_seen(windows, start, end):
+            continue
+        return chain, [w for w in windows if w.start <= end and w.end >= start]
+    return None
