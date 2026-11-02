@@ -157,6 +157,10 @@ class Settings(BaseSettings):
     trigger_semantic_min_score: float = Field(default=0.6, ge=0, le=1)
     trigger_finish_poll_seconds: int = Field(default=10, gt=0)
     trigger_finish_margin_seconds: int = Field(default=30, ge=0)
+    # Trigger tests (step 5.4, ADR 0035): candidates from search, then at most this many
+    # would-be events verified by the VLM.
+    trigger_test_candidates: int = Field(default=50, gt=0)
+    trigger_test_verify_max: int = Field(default=10, ge=0)
 
     # MVP plan §2
     keyframes_per_window: int = Field(default=6, gt=0)

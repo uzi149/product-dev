@@ -43,13 +43,7 @@ from services.triggers.events import (
     process_finish,
     record_match,
 )
-from services.triggers.matching import (
-    WindowFacts,
-    classes_seen,
-    match_sequence,
-    timeline,
-    window_facts,
-)
+from services.triggers.matching import WindowFacts, match_rule, window_facts
 from shared.database.models import (
     AnalysisWindow,
     CompileStatus,
@@ -91,13 +85,12 @@ class TriggerTools:
 _rule_vectors: dict[tuple[str, str, str], tuple[np.ndarray, np.ndarray]] = {}
 
 
-def rule_vectors(text: str, tools: TriggerTools) -> tuple[np.ndarray, np.ndarray]:
-    key = (tools.text_embedder.name, tools.image_embedder.name, text)
+def rule_vectors(
+    text: str, text_embedder: TextEmbedder, image_embedder: ImageEmbedder
+) -> tuple[np.ndarray, np.ndarray]:
+    key = (text_embedder.name, image_embedder.name, text)
     if key not in _rule_vectors:
-        _rule_vectors[key] = (
-            tools.text_embedder.embed_query(text),
-            tools.image_embedder.embed_text(text),
-        )
+        _rule_vectors[key] = (text_embedder.embed_query(text), image_embedder.embed_text(text))
     return _rule_vectors[key]
 
 
@@ -117,7 +110,7 @@ def enabled_triggers(session: Session, camera_id: UUID) -> list[Trigger]:
     )
 
 
-def _facts(row: AnalysisWindow) -> WindowFacts:
+def facts(row: AnalysisWindow) -> WindowFacts:
     return window_facts(
         row.id,
         row.segment_id,
@@ -143,33 +136,45 @@ def structured_match(
         )
         .order_by(AnalysisWindow.start_time)
     ).all()
-    windows = [_facts(r) for r in rows]
-    actions = timeline(windows, overlap_seconds)
     # The required sequence, or any alternative way the analysis may describe the same event.
-    for sequence in rule.action_sequences:
-        chain = match_sequence(actions, sequence, rule.maximum_sequence_gap_seconds, current.id)
-        if chain is None:
-            continue
-        start, end = chain[0].start, max(a.end for a in chain)
-        if not set(rule.required_entities) <= classes_seen(windows, start, end):
-            continue
-        used = [w for w in windows if w.start <= end and w.end >= start]
-        return Match("structured", used, chain)
-    return None
+    found = match_rule(
+        [facts(r) for r in rows],
+        rule.action_sequences,
+        rule.maximum_sequence_gap_seconds,
+        overlap_seconds,
+        rule.required_entities,
+        current.id,
+    )
+    return Match("structured", found[1], found[0]) if found else None
+
+
+def semantic_scores(
+    session: Session,
+    rule: CompiledRule,
+    window_ids: list[UUID],
+    text_embedder: TextEmbedder,
+    image_embedder: ImageEmbedder,
+    settings,
+) -> dict[UUID, float]:
+    """The windows' hybrid scores (4.2) for the rule's search text."""
+    text_vector, visual_vector = rule_vectors(rule.search_text, text_embedder, image_embedder)
+    # The event signal would let this trigger's own earlier events raise the score.
+    settings = settings.model_copy(update={"query_weight_event": 0.0})
+    signals = hybrid.score(
+        session, window_ids, rule.search_text, text_vector, visual_vector, settings
+    )
+    return {window_id: s.fused for window_id, s in signals.items()}
 
 
 def semantic_match(
     session: Session, rule: CompiledRule, current: AnalysisWindow, tools: TriggerTools
 ) -> Match | None:
-    text_vector, visual_vector = rule_vectors(rule.search_text, tools)
-    # The event signal would let this trigger's own earlier events raise the score.
-    settings = tools.settings.model_copy(update={"query_weight_event": 0.0})
-    signals = hybrid.score(
-        session, [current.id], rule.search_text, text_vector, visual_vector, settings
+    score = semantic_scores(
+        session, rule, [current.id], tools.text_embedder, tools.image_embedder, tools.settings
     ).get(current.id)
-    if signals is None or signals.fused < tools.settings.trigger_semantic_min_score:
+    if score is None or score < tools.settings.trigger_semantic_min_score:
         return None
-    return Match("semantic", [_facts(current)], score=round(signals.fused, 3))
+    return Match("semantic", [facts(current)], score=round(score, 3))
 
 
 def _evidence(session: Session, match: Match, camera_id: UUID, settings) -> EvidenceResult:
@@ -198,18 +203,23 @@ def _evidence(session: Session, match: Match, camera_id: UUID, settings) -> Evid
 
 
 def verify_match(
-    session: Session, rule: CompiledRule, match: Match, camera_id: UUID, tools: TriggerTools
+    session: Session,
+    rule: CompiledRule,
+    match: Match,
+    camera_id: UUID,
+    vlm: VisionLanguageModel,
+    storage: StorageClient,
+    settings,
 ) -> Verification:
-    settings = tools.settings
     if not rule.requires_vlm_verification:
         return Verification("not_required")
     if resolve_vlm_backend(settings) == "local":
         return Verification("not_verified_local", reason="verification is off with the local model")
     try:
         verdict = verify(
-            tools.vlm,
+            vlm,
             session,
-            tools.storage,
+            storage,
             _evidence(session, match, camera_id, settings),
             rule.search_text,
             settings.query_verify_frames,
@@ -272,7 +282,9 @@ def evaluate_window(session: Session, window_id: UUID, tools: TriggerTools) -> l
             match = semantic_match(session, rule, current, tools)
         if match is None:
             continue
-        verification = verify_match(session, rule, match, current.camera_id, tools)
+        verification = verify_match(
+            session, rule, match, current.camera_id, tools.vlm, tools.storage, tools.settings
+        )
         if verification.status == "rejected":
             log.info(
                 "trigger %s on window %s: rejected by the VLM (%s)",

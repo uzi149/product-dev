@@ -376,6 +376,8 @@ def test_the_websocket_closes_when_its_query_is_deleted(client, queries_queued, 
     with client.websocket_connect(f"/queries/{finished}/progress") as ws:
         assert ws.receive_json()["state"]["stage"] == "verifying"
         assert client.delete(f"/queries/{finished}").status_code == 204
+        # A snapshot taken while the delete commits (results already gone) may come first.
         with pytest.raises(WebSocketDisconnect) as closed:
-            ws.receive_json()
+            for _ in range(5):
+                ws.receive_json()
         assert closed.value.code == 4404

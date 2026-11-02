@@ -42,6 +42,11 @@ def get_query_events() -> QueryEvents:
     return QueryEvents()
 
 
+def get_trigger_test_queue() -> Callable[[UUID], None]:
+    """Queues a trigger test on the query worker (step 5.4); tests replace it."""
+    return jobs.queue_test_trigger
+
+
 def get_export_queue() -> Callable[[UUID], None]:
     """Queues the export of an event's evidence as one MP4 (step 5.3); tests replace it."""
     return jobs.queue_export_event
@@ -67,5 +72,6 @@ __all__ = [
     "get_session",
     "get_storage_client",
     "get_trigger_queue",
+    "get_trigger_test_queue",
     "get_upload_queue",
 ]

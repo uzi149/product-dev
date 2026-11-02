@@ -7,13 +7,15 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from services.api.deps import get_trigger_queue
+from services.api.deps import get_trigger_queue, get_trigger_test_queue
 from shared.database.models import (
     Camera,
     Event,
     EventEvidence,
     Trigger,
     TriggerCamera,
+    TriggerTest,
+    Upload,
     VideoSegment,
 )
 
@@ -234,3 +236,166 @@ def test_delete_removes_the_trigger_with_its_events(client, compiles, cameras, e
         assert session.get(VideoSegment, segment_id) is not None  # footage stays
         assert session.get(Camera, cameras[0]) is not None
     assert client.delete(f"/triggers/{trigger}").status_code == 404
+
+
+# Trigger tests (step 5.4, ADR 0035)
+
+
+@pytest.fixture
+def tests_queued(client):
+    asked = []
+    client.app.dependency_overrides[get_trigger_test_queue] = lambda: asked.append
+    return asked
+
+
+@pytest.fixture
+def ready(client, compiles, cameras, engine):
+    """A compiled trigger on CAM-01."""
+    trigger = create(client, cameras[:1]).json()["id"]
+    compiled(engine, trigger)
+    return trigger
+
+
+@pytest.fixture
+def upload(engine, cameras):
+    """An uploaded video on CAM-02 that was stored as two segments (9:00-9:00:30 and
+    9:01-9:01:30), plus another camera's segment stored meanwhile and an older segment."""
+    ingested_at = datetime(2026, 11, 2, 10, 0, tzinfo=UTC)
+    with Session(engine) as session:
+        upload = Upload(
+            camera_id=cameras[1],
+            filename="LeftBag.mpg",
+            start_time=T0,
+            status="done",
+            created_at=ingested_at,
+            finished_at=ingested_at + timedelta(minutes=2),
+        )
+        session.add(upload)
+
+        def segment(camera, offset_s, stored_at):
+            session.add(
+                VideoSegment(
+                    camera_id=camera,
+                    start_time=T0 + timedelta(seconds=offset_s),
+                    end_time=T0 + timedelta(seconds=offset_s + 30),
+                    duration_ms=30_000,
+                    storage_uri="s3://sentinel/x.mp4",
+                    created_at=stored_at,
+                )
+            )
+
+        segment(cameras[1], 0, ingested_at + timedelta(seconds=30))
+        segment(cameras[1], 60, ingested_at + timedelta(seconds=60))
+        segment(cameras[1], -3600, ingested_at - timedelta(days=1))  # an earlier upload
+        segment(cameras[0], 0, ingested_at + timedelta(seconds=40))  # another camera
+        session.commit()
+        return upload.id
+
+
+def test_a_test_on_an_uploaded_video_covers_its_footage(
+    client, tests_queued, ready, upload, cameras
+):
+    response = client.post(
+        f"/triggers/{ready}/test", json={"source": "video", "upload_id": str(upload)}
+    )
+    assert response.status_code == 202
+    test = response.json()
+    assert test["status"] == "pending" and test["upload_filename"] == "LeftBag.mpg"
+    assert test["camera_ids"] == [str(cameras[1])]  # the upload's camera, not the trigger's
+    assert test["start"].startswith("2026-03-07T09:00:00") and test["end"].startswith(
+        "2026-03-07T09:01:30"
+    )
+    assert test["rule"]["required_action_sequence"] == ["place_object", "leave"]
+    assert (test["minimum_confidence"], test["cooldown_seconds"]) == (0.8, 120)
+    assert [str(i) for i in tests_queued] == [test["id"]]
+
+
+def test_a_test_on_the_last_hour_uses_the_triggers_cameras(client, tests_queued, ready, cameras):
+    test = client.post(f"/triggers/{ready}/test", json={"source": "last_hour"}).json()
+    assert test["camera_ids"] == [str(cameras[0])]
+    start, end = (datetime.fromisoformat(test[k]) for k in ("start", "end"))
+    assert end - start == timedelta(hours=1)
+    day = client.post(f"/triggers/{ready}/test", json={"source": "last_24h"}).json()
+    assert datetime.fromisoformat(day["end"]) - datetime.fromisoformat(day["start"]) == timedelta(
+        hours=24
+    )
+    span = {"source": "range", "start": "2026-03-07T09:00:00Z", "end": "2026-03-07T10:00:00Z"}
+    ranged = client.post(f"/triggers/{ready}/test", json=span).json()
+    assert ranged["start"].startswith("2026-03-07T09:00:00")
+
+
+@pytest.mark.parametrize(
+    ("body", "message"),
+    [
+        ({"source": "video"}, "choose the uploaded video"),
+        ({"source": "video", "upload_id": str(uuid4())}, "unknown uploaded video"),
+        ({"source": "range", "start": "2026-03-07T09:00:00Z"}, "needs a start and an end"),
+        (
+            {"source": "range", "start": "2026-03-07T10:00:00Z", "end": "2026-03-07T09:00:00Z"},
+            "the end must be after the start",
+        ),
+        ({"source": "yesterday"}, "Input should be"),
+    ],
+)
+def test_bad_tests_are_refused(client, tests_queued, ready, body, message):
+    response = client.post(f"/triggers/{ready}/test", json=body)
+    assert response.status_code == 422 and message in str(response.json()["detail"])
+    assert tests_queued == []
+
+
+def test_a_video_without_stored_footage_is_refused(client, tests_queued, ready, engine, cameras):
+    with Session(engine) as session:
+        empty = Upload(camera_id=cameras[0], filename="still.mp4", start_time=T0, status="done")
+        session.add(empty)
+        session.commit()
+        empty_id = empty.id
+    response = client.post(
+        f"/triggers/{ready}/test", json={"source": "video", "upload_id": str(empty_id)}
+    )
+    assert response.status_code == 422 and "no stored footage" in response.json()["detail"]
+
+
+def test_an_uncompiled_trigger_cant_be_tested(client, tests_queued, compiles, cameras):
+    trigger = create(client, cameras[:1]).json()["id"]
+    response = client.post(f"/triggers/{trigger}/test", json={"source": "last_hour"})
+    assert response.status_code == 409
+
+
+def test_a_queue_that_is_down_fails_the_test(client, ready):
+    def down(test_id):
+        raise ConnectionError("Redis is down (test)")
+
+    client.app.dependency_overrides[get_trigger_test_queue] = lambda: down
+    assert client.post(f"/triggers/{ready}/test", json={"source": "last_hour"}).status_code == 503
+    (test,) = client.get(f"/triggers/{ready}/tests").json()
+    assert test["status"] == "failed" and "not reachable" in test["error"]
+
+
+def test_tests_are_listed_newest_first_and_read_back(
+    client, tests_queued, ready, compiles, cameras, engine
+):
+    first = client.post(f"/triggers/{ready}/test", json={"source": "last_hour"}).json()["id"]
+    second = client.post(f"/triggers/{ready}/test", json={"source": "last_24h"}).json()["id"]
+    with Session(engine) as session:  # what the query worker stores
+        test = session.get(TriggerTest, first)
+        test.status, test.stage = "done", "done"
+        test.results_json = {
+            "candidates": 12,
+            "footage_seconds": 3600.0,
+            "counts": {"would_report": 0, "rejected": 0, "below_confidence": 0},
+            "matches": [],
+        }
+        session.commit()
+    assert [t["id"] for t in client.get(f"/triggers/{ready}/tests").json()] == [second, first]
+    done = client.get(f"/triggers/{ready}/tests/{first}").json()
+    assert done["status"] == "done" and done["candidates"] == 12
+    assert done["footage_seconds"] == 3600.0
+    other = create(client, cameras[:1], name="Other").json()["id"]
+    assert client.get(f"/triggers/{other}/tests/{first}").status_code == 404
+
+
+def test_deleting_a_trigger_deletes_its_tests(client, tests_queued, ready, engine):
+    client.post(f"/triggers/{ready}/test", json={"source": "last_hour"})
+    assert client.delete(f"/triggers/{ready}").status_code == 204
+    with Session(engine) as session:
+        assert session.query(TriggerTest).count() == 0

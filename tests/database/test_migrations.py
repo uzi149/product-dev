@@ -21,6 +21,7 @@ EXPECTED_TABLES = {
     "uploads",
     "index_settings",
     "query_evidence",
+    "trigger_tests",
 }
 
 
@@ -76,14 +77,23 @@ def test_indexes_from_scope_5_3_exist(engine):
 
 def test_uploads_migration_downgrades_on_its_own(migrated_db, alembic_config):
     command.downgrade(alembic_config, "0001")
-    assert _tables(migrated_db) == EXPECTED_TABLES - {"uploads", "index_settings", "query_evidence"}
+    assert _tables(migrated_db) == EXPECTED_TABLES - {
+        "uploads",
+        "index_settings",
+        "query_evidence",
+        "trigger_tests",
+    }
     command.upgrade(alembic_config, "head")
     assert "uploads" in _tables(migrated_db)
 
 
 def test_index_settings_migration_downgrades_on_its_own(migrated_db, alembic_config):
     command.downgrade(alembic_config, "0002")
-    assert _tables(migrated_db) == EXPECTED_TABLES - {"index_settings", "query_evidence"}
+    assert _tables(migrated_db) == EXPECTED_TABLES - {
+        "index_settings",
+        "query_evidence",
+        "trigger_tests",
+    }
     command.upgrade(alembic_config, "head")
     assert "index_settings" in _tables(migrated_db)
 
@@ -123,7 +133,7 @@ def test_segment_status_changed_at_starts_at_created_at(migrated_db, alembic_con
 
 def test_query_progress_migration_downgrades_on_its_own(migrated_db, alembic_config):
     command.downgrade(alembic_config, "0005")
-    assert _tables(migrated_db) == EXPECTED_TABLES - {"query_evidence"}
+    assert _tables(migrated_db) == EXPECTED_TABLES - {"query_evidence", "trigger_tests"}
     engine = create_engine(migrated_db)
     try:
         with engine.connect() as conn:
@@ -183,3 +193,10 @@ def test_event_review_migration_downgrades_on_its_own(migrated_db, alembic_confi
     finally:
         engine.dispose()
     command.upgrade(alembic_config, "head")
+
+
+def test_trigger_tests_migration_downgrades_on_its_own(migrated_db, alembic_config):
+    command.downgrade(alembic_config, "0010")
+    assert "trigger_tests" not in _tables(migrated_db)
+    command.upgrade(alembic_config, "head")
+    assert "trigger_tests" in _tables(migrated_db)

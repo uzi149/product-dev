@@ -12,10 +12,11 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AwareDatetime, BaseModel, Field, field_validator, model_validator
 
 from shared.schemas.entities import EntityClass
 from shared.schemas.observation import ACTION_VOCABULARY
+from shared.schemas.query import PlaybackManifest
 
 MIN_GAP_SECONDS, MAX_GAP_SECONDS, DEFAULT_GAP_SECONDS = 5, 600, 30
 
@@ -127,3 +128,91 @@ class TriggerRead(_TriggerSettings):
     events: EventCounts
     created_at: datetime
     updated_at: datetime
+
+
+class TriggerTestCreate(BaseModel):
+    """Scope §12.4: a selected test video (an upload, ADR 0035), the previous hour, the previous
+    24 hours or a custom range."""
+
+    source: Literal["video", "last_hour", "last_24h", "range"]
+    upload_id: UUID | None = None
+    start: AwareDatetime | None = None
+    end: AwareDatetime | None = None
+
+    @model_validator(mode="after")
+    def _complete(self) -> "TriggerTestCreate":
+        if self.source == "video" and self.upload_id is None:
+            raise ValueError("choose the uploaded video to test on")
+        if self.source == "range":
+            if self.start is None or self.end is None:
+                raise ValueError("a custom range needs a start and an end")
+            if self.end <= self.start:
+                raise ValueError("the end must be after the start")
+        return self
+
+
+class TestAction(BaseModel):
+    type: str
+    start: datetime
+    end: datetime
+
+
+class TestVerification(BaseModel):
+    # verified, rejected, not_required, unverifiable, not_verified_local, not_checked
+    status: str
+    confidence: float | None = None
+    reason: str | None = None
+
+
+class TestMatch(BaseModel):
+    """A would-be event: what the trigger would have reported, and the verdict."""
+
+    __test__ = False
+
+    camera_id: UUID
+    camera_name: str
+    start_time: datetime
+    end_time: datetime
+    verdict: Literal["would_report", "rejected", "below_confidence"]
+    confidence: float
+    verification: TestVerification
+    mode: str
+    score: float | None
+    actions: list[TestAction]
+    summary: str | None
+    keyframe_id: UUID | None
+    manifest: PlaybackManifest
+
+
+class TestCounts(BaseModel):
+    __test__ = False
+
+    would_report: int = 0
+    rejected: int = 0
+    below_confidence: int = 0
+
+
+class TriggerTestRead(BaseModel):
+    __test__ = False
+
+    id: UUID
+    trigger_id: UUID
+    source: Literal["video", "last_hour", "last_24h", "range"]
+    upload_id: UUID | None
+    upload_filename: str | None
+    camera_ids: list[UUID]
+    start: datetime
+    end: datetime
+    status: Literal["pending", "running", "done", "failed"]
+    stage: str | None
+    error: str | None
+    created_at: datetime
+    finished_at: datetime | None
+    # The rule and settings the test used (the trigger may have changed since).
+    rule: CompiledRule
+    minimum_confidence: float
+    cooldown_seconds: int
+    candidates: int | None = None
+    footage_seconds: float | None = None
+    counts: TestCounts = Field(default_factory=TestCounts)
+    matches: list[TestMatch] = Field(default_factory=list)

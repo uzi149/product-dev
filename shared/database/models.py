@@ -358,6 +358,43 @@ class TriggerCamera(Base):
     )
 
 
+class TriggerTestSource(enum.StrEnum):
+    VIDEO = "video"  # an uploaded file's footage
+    LAST_HOUR = "last_hour"
+    LAST_24H = "last_24h"
+    RANGE = "range"
+
+
+class TriggerTest(Base):
+    """A trigger run on stored footage before it is enabled (scope §12.4, step 5.4, ADR 0035):
+    what it would have reported. Never creates events. `rule_json` is the compiled rule and
+    settings the test used; `results_json` the would-be events with their verdicts."""
+
+    __tablename__ = "trigger_tests"
+    __table_args__ = (
+        _one_of("source", TriggerTestSource, "source"),
+        _one_of("status", QueryStatus, "status"),
+        Index("ix_trigger_tests_trigger_id_created_at", "trigger_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    trigger_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("triggers.id", ondelete="CASCADE"))
+    source: Mapped[str] = mapped_column(String(20))
+    upload_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("uploads.id", ondelete="SET NULL")
+    )
+    camera_ids: Mapped[list[uuid.UUID]] = mapped_column(ARRAY(UUID(as_uuid=True)))
+    start_time: Mapped[datetime] = _timestamp()
+    end_time: Mapped[datetime] = _timestamp()
+    status: Mapped[str] = mapped_column(String(20), server_default=QueryStatus.PENDING.value)
+    stage: Mapped[str | None] = mapped_column(String(20))
+    error: Mapped[str | None] = mapped_column(Text)
+    rule_json: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    results_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = _created_at()
+    finished_at: Mapped[datetime | None] = _timestamp(nullable=True)
+
+
 class Event(Base):
     """What a trigger reported (step 5.2, ADR 0033). Held while `alerted_at` is empty: the alert
     waits until the footage up to the post-roll is stored. `details_json` holds the mode, the

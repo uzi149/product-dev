@@ -7,28 +7,40 @@ can only be enabled once the compile is `done`. Deleting a trigger also deletes 
 """
 
 from collections import Counter
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from services.api.deps import get_session, get_storage_client, get_trigger_queue
+from services.api.deps import (
+    get_session,
+    get_storage_client,
+    get_trigger_queue,
+    get_trigger_test_queue,
+)
 from services.api.routers.events import delete_events
 from shared.database.models import (
     Camera,
     CompileStatus,
     Event,
     EventStatus,
+    QueryStatus,
     Trigger,
     TriggerCamera,
+    TriggerTest,
+    Upload,
+    VideoSegment,
 )
 from shared.schemas.trigger import (
     CompiledRule,
     EventCounts,
+    TestCounts,
     TriggerCreate,
     TriggerRead,
+    TriggerTestCreate,
+    TriggerTestRead,
     TriggerUpdate,
 )
 from shared.schemas.trigger import TriggerCamera as TriggerCameraRead
@@ -244,3 +256,136 @@ def delete_trigger(
     session.delete(trigger)
     session.commit()
     return Response(status_code=204)
+
+
+# Trigger tests (scope §12.4, step 5.4, ADR 0035)
+
+RECENT_TESTS = 5
+
+
+def upload_span(session: Session, upload: Upload) -> tuple[datetime, datetime] | None:
+    """The stored footage of an uploaded video: its camera's segments stored while it was being
+    ingested (uploads are ingested one at a time, 2.2). None when it has none."""
+    finished = upload.finished_at or datetime.now(UTC)
+    row = session.execute(
+        select(func.min(VideoSegment.start_time), func.max(VideoSegment.end_time)).where(
+            VideoSegment.camera_id == upload.camera_id,
+            VideoSegment.start_time >= upload.start_time,
+            VideoSegment.created_at >= upload.created_at,
+            VideoSegment.created_at <= finished + timedelta(seconds=1),
+        )
+    ).first()
+    return (row[0], row[1]) if row and row[0] is not None else None
+
+
+def _test_read(session: Session, test: TriggerTest) -> TriggerTestRead:
+    upload = session.get(Upload, test.upload_id) if test.upload_id else None
+    results = test.results_json or {}
+    settings = test.rule_json["settings"]
+    return TriggerTestRead(
+        id=test.id,
+        trigger_id=test.trigger_id,
+        source=test.source,
+        upload_id=test.upload_id,
+        upload_filename=upload.filename if upload else None,
+        camera_ids=test.camera_ids,
+        start=test.start_time,
+        end=test.end_time,
+        status=test.status,
+        stage=test.stage,
+        error=test.error,
+        created_at=test.created_at,
+        finished_at=test.finished_at,
+        rule=CompiledRule.model_validate(test.rule_json["rule"]),
+        minimum_confidence=settings["minimum_confidence"],
+        cooldown_seconds=settings["cooldown_seconds"],
+        candidates=results.get("candidates"),
+        footage_seconds=results.get("footage_seconds"),
+        counts=TestCounts(**results.get("counts", {})),
+        matches=results.get("matches", []),
+    )
+
+
+@router.post("/{trigger_id}/test", response_model=TriggerTestRead, status_code=202)
+def test_trigger(
+    trigger_id: UUID,
+    body: TriggerTestCreate,
+    session: Session = Depends(get_session),
+    queue=Depends(get_trigger_test_queue),
+) -> TriggerTestRead:
+    """Run the trigger's current rule and settings on stored footage; no events are created."""
+    trigger = _get_trigger(session, trigger_id)
+    if trigger.compile_status != CompileStatus.DONE or not trigger.compiled_rule_json:
+        raise HTTPException(409, "the rule isn't compiled yet")
+    now = datetime.now(UTC)
+    upload = None
+    if body.source == "video":
+        upload = session.get(Upload, body.upload_id)
+        if upload is None:
+            raise HTTPException(422, "unknown uploaded video")
+        span = upload_span(session, upload)
+        if span is None:
+            raise HTTPException(422, "this video has no stored footage (nothing moved in it)")
+        camera_ids, (start, end) = [upload.camera_id], span
+    else:
+        camera_ids = [c.id for c in trigger.cameras]
+        if not camera_ids:
+            raise HTTPException(409, "assign at least one camera first")
+        if body.source == "last_hour":
+            start, end = now - timedelta(hours=1), now
+        elif body.source == "last_24h":
+            start, end = now - timedelta(hours=24), now
+        else:
+            start, end = body.start, body.end
+    test = TriggerTest(
+        trigger_id=trigger.id,
+        source=body.source,
+        upload_id=upload.id if upload else None,
+        camera_ids=camera_ids,
+        start_time=start,
+        end_time=end,
+        status=QueryStatus.PENDING,
+        rule_json={
+            "rule": trigger.compiled_rule_json,
+            "settings": {
+                "minimum_confidence": trigger.minimum_confidence,
+                "cooldown_seconds": trigger.cooldown_seconds,
+                "pre_roll_seconds": trigger.pre_roll_seconds,
+                "post_roll_seconds": trigger.post_roll_seconds,
+            },
+        },
+    )
+    session.add(test)
+    session.commit()
+    try:
+        queue(test.id)
+    except Exception as error:  # noqa: BLE001 - any broker failure
+        test.status, test.error = QueryStatus.FAILED, "the test queue is not reachable"
+        test.finished_at = datetime.now(UTC)
+        session.commit()
+        raise HTTPException(503, f"the test queue is not reachable (is Redis running?): {error}")
+    session.refresh(test)
+    return _test_read(session, test)
+
+
+@router.get("/{trigger_id}/tests", response_model=list[TriggerTestRead])
+def list_tests(trigger_id: UUID, session: Session = Depends(get_session)) -> list[TriggerTestRead]:
+    """The trigger's latest tests, newest first (the builder shows the first)."""
+    _get_trigger(session, trigger_id)
+    tests = session.scalars(
+        select(TriggerTest)
+        .where(TriggerTest.trigger_id == trigger_id)
+        .order_by(TriggerTest.created_at.desc())
+        .limit(RECENT_TESTS)
+    ).all()
+    return [_test_read(session, t) for t in tests]
+
+
+@router.get("/{trigger_id}/tests/{test_id}", response_model=TriggerTestRead)
+def get_test(
+    trigger_id: UUID, test_id: UUID, session: Session = Depends(get_session)
+) -> TriggerTestRead:
+    test = session.get(TriggerTest, test_id)
+    if test is None or test.trigger_id != trigger_id:
+        raise HTTPException(404, "test not found")
+    return _test_read(session, test)
