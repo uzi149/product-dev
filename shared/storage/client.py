@@ -124,9 +124,19 @@ class StorageClient:
             raise _wrap(error) from error
         return True
 
-    def presigned_get_url(self, key: str, expires: timedelta = timedelta(hours=1)) -> str:
+    def presigned_get_url(
+        self, key: str, expires: timedelta = timedelta(hours=1), download_name: str | None = None
+    ) -> str:
+        """`download_name`: the browser saves the file under this name instead of playing it."""
+        headers = (
+            {"response-content-disposition": f'attachment; filename="{download_name}"'}
+            if download_name
+            else None
+        )
         try:
-            return self._signer.presigned_get_object(self.bucket, key, expires=expires)
+            return self._signer.presigned_get_object(
+                self.bucket, key, expires=expires, response_headers=headers
+            )
         except _ERRORS as error:
             raise _wrap(error) from error
 

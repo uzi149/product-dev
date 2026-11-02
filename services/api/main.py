@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from services.api.routers import (
     cameras,
+    events,
     health,
     keyframes,
     live,
@@ -45,6 +46,7 @@ def create_app() -> FastAPI:
         queries,
         keyframes,
         triggers,
+        events,
         live,
     ):
         app.include_router(module.router)

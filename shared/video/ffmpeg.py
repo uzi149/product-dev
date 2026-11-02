@@ -225,3 +225,113 @@ def extract_frame_jpeg(src: str | Path, t_s: float, dst: str | Path) -> None:
         raise FFmpegError(
             f"ffmpeg could not read a frame at {t_s:.1f} s: {result.stderr.strip()[-300:]}"
         )
+
+
+# Exports (step 5.3): every piece is encoded the same way (size, frame rate, H.264 settings), so
+# the pieces can be joined without encoding them again.
+_EXPORT_CODEC = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p"]
+
+
+def _fit(width: int, height: int, fps: int) -> str:
+    """Scale into width x height keeping the picture's shape (black bars), at `fps`, in the
+    standard (TV) colour range: cameras send either range, and joined pieces must match."""
+    return (
+        f"scale={width}:{height}:force_original_aspect_ratio=decrease:out_range=tv,"
+        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps},format=yuv420p"
+    )
+
+
+def encode_part(
+    src: str | Path,
+    dst: str | Path,
+    start_s: float,
+    end_s: float,
+    width: int,
+    height: int,
+    fps: int,
+) -> None:
+    """[start_s, end_s] of `src` as an export piece of width x height at `fps` (no audio)."""
+    if end_s <= start_s:
+        raise ValueError("end_s must be after start_s")
+    result = _run(
+        [
+            _require("ffmpeg"),
+            "-y",
+            "-v",
+            "error",
+            "-ss",
+            _seconds(start_s),
+            "-i",
+            str(src),
+            "-t",
+            _seconds(end_s - start_s),
+            "-map",
+            "0:v:0",
+            "-vf",
+            _fit(width, height, fps),
+            *_EXPORT_CODEC,
+            "-an",
+            str(dst),
+        ]
+    )
+    if result.returncode != 0:
+        raise FFmpegError(f"ffmpeg could not encode a part: {result.stderr.strip()[-300:]}")
+
+
+def still_clip(
+    image: str | Path, dst: str | Path, seconds: float, width: int, height: int, fps: int
+) -> None:
+    """A picture shown for `seconds`, as an export piece of width x height at `fps`."""
+    result = _run(
+        [
+            _require("ffmpeg"),
+            "-y",
+            "-v",
+            "error",
+            "-loop",
+            "1",
+            "-i",
+            str(image),
+            "-t",
+            _seconds(seconds),
+            "-vf",
+            _fit(width, height, fps),
+            *_EXPORT_CODEC,
+            "-an",
+            str(dst),
+        ]
+    )
+    if result.returncode != 0:
+        raise FFmpegError(f"ffmpeg could not make a still clip: {result.stderr.strip()[-300:]}")
+
+
+def concat_clips(clips: list[Path], dst: str | Path) -> VideoInfo:
+    """Join export pieces encoded alike into one browser-playable MP4, without encoding again."""
+    if not clips:
+        raise ValueError("nothing to join")
+    listing = Path(dst).with_suffix(".txt")
+    listing.write_text(
+        "".join(f"file '{Path(c).resolve().as_posix()}'\n" for c in clips), encoding="utf-8"
+    )
+    result = _run(
+        [
+            _require("ffmpeg"),
+            "-y",
+            "-v",
+            "error",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(listing),
+            "-c",
+            "copy",
+            "-movflags",
+            "+faststart",
+            str(dst),
+        ]
+    )
+    if result.returncode != 0:
+        raise FFmpegError(f"ffmpeg could not join the parts: {result.stderr.strip()[-300:]}")
+    return probe(dst)
