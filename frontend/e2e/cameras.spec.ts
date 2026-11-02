@@ -89,14 +89,17 @@ async function addCamera(page: Page, name: string, rtspUrl?: string) {
 test("the shell shows every screen in the sidebar and the API health", async ({ page }) => {
   await page.goto("/");
   const nav = page.locator("aside nav a");
+  // Events may carry the number of new events.
   await expect(nav).toHaveText([
-    "Overview", "Live cameras", "Events", "Investigate", "Triggers", "Cameras", "Settings",
+    "Overview", "Live cameras", /^Events\d*$/, "Investigate", "Triggers", "Cameras", "Settings",
   ]);
   await expect(page.locator("aside").getByText("Operational")).toBeVisible();
 
-  for (const route of ["/events", "/triggers", "/settings"]) {
+  // Every screen is built (Phase 5): none shows the "Not built yet" placeholder any more.
+  for (const [route, heading] of [["/events", "Events"], ["/triggers", "Triggers"], ["/settings", "Settings"]]) {
     await page.goto(route);
-    await expect(page.getByText("Not built yet")).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: heading })).toBeVisible();
+    await expect(page.getByText("Not built yet")).toHaveCount(0);
   }
   await page.goto("/investigate");
   await expect(page.getByLabel("Question")).toBeVisible();

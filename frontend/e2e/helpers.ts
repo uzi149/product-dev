@@ -64,3 +64,16 @@ export async function cameraWithSegment(): Promise<{ cameraId: string; segmentId
   const segmentId = await addSegment(camera.id, "2026-03-07T09:05:00Z");
   return { cameraId: camera.id, segmentId, name: camera.display_name };
 }
+
+/**
+ * `fetch` for the e2e API that tries once more on a network error: after a blocking call (the
+ * e2e_db seeding runs Python synchronously) Node can reuse a keep-alive connection the API has
+ * already closed, and the request fails with ECONNRESET.
+ */
+export async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch {
+    return await fetch(url, init);
+  }
+}

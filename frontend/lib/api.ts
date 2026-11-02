@@ -4,14 +4,26 @@ import type {
   CameraUpdate,
   ConnectionTestResult,
   DeletePreview,
+  EventCounts,
+  EventDetail,
+  EventItem,
+  EventList,
+  EventStatus,
   EvidenceItem,
+  ExportState,
   Health,
   QueryInput,
   QueryList,
   QueryState,
   Segment,
+  SettingSection,
   StaticPeriod,
   StatusCounts,
+  Trigger,
+  TriggerInput,
+  TriggerTest,
+  TriggerTestInput,
+  TriggerUpdate,
   Upload,
 } from "./types";
 
@@ -109,6 +121,52 @@ export const api = {
   /** Deletes the query with its results, for good (HTTP 204). */
   deleteQuery: (id: string) => request<null>(`/queries/${id}`, { method: "DELETE" }),
   queryResults: (id: string) => request<EvidenceItem[]>(`/queries/${id}/results`),
+  // Triggers (steps 5.1, 5.4)
+  triggers: () => request<Trigger[]>("/triggers"),
+  trigger: (id: string) => request<Trigger>(`/triggers/${id}`),
+  createTrigger: (input: TriggerInput) => request<Trigger>("/triggers", json("POST", input)),
+  updateTrigger: (id: string, input: TriggerUpdate) =>
+    request<Trigger>(`/triggers/${id}`, json("PATCH", input)),
+  compileTrigger: (id: string) => request<Trigger>(`/triggers/${id}/compile`, { method: "POST" }),
+  enableTrigger: (id: string) => request<Trigger>(`/triggers/${id}/enable`, { method: "POST" }),
+  disableTrigger: (id: string) => request<Trigger>(`/triggers/${id}/disable`, { method: "POST" }),
+  /** Deletes the trigger with its events and tests, for good (HTTP 204, ADR 0034). */
+  deleteTrigger: (id: string) => request<null>(`/triggers/${id}`, { method: "DELETE" }),
+  testTrigger: (id: string, input: TriggerTestInput) =>
+    request<TriggerTest>(`/triggers/${id}/test`, json("POST", input)),
+  triggerTests: (id: string) => request<TriggerTest[]>(`/triggers/${id}/tests`),
+  triggerTest: (id: string, testId: string) =>
+    request<TriggerTest>(`/triggers/${id}/tests/${testId}`),
+  /** Uploaded videos of every camera, most recent first (a trigger test's source). */
+  allUploads: () => request<Upload[]>(`/videos/uploads?${new URLSearchParams({ limit: "50" })}`),
+  // Events (step 5.3)
+  events: (params: {
+    status?: EventStatus | null;
+    cameraId?: string | null;
+    triggerId?: string | null;
+    limit: number;
+    offset?: number;
+  }) => {
+    const query = new URLSearchParams({ limit: String(params.limit), offset: String(params.offset ?? 0) });
+    if (params.status) query.set("status", params.status);
+    if (params.cameraId) query.set("camera_id", params.cameraId);
+    if (params.triggerId) query.set("trigger_id", params.triggerId);
+    return request<EventList>(`/events?${query}`);
+  },
+  eventCounts: () => request<EventCounts>("/events/counts"),
+  event: (id: string) => request<EventDetail>(`/events/${id}`),
+  acknowledgeEvent: (id: string, status: EventStatus, note?: string | null) =>
+    request<EventItem>(
+      `/events/${id}/acknowledge`,
+      json("POST", note === undefined ? { status } : { status, note }),
+    ),
+  exportEvent: (id: string) => request<ExportState>(`/events/${id}/export`, { method: "POST" }),
+  exportState: (id: string) => request<ExportState>(`/events/${id}/export`),
+  /** Deletes the event with its evidence rows and export (HTTP 204, ADR 0034). */
+  deleteEvent: (id: string) => request<null>(`/events/${id}`, { method: "DELETE" }),
+  /** New events as they are reported (step 5.2). */
+  liveEventsUrl: () => `${API_URL.replace(/^http/, "ws")}/live/events`,
+  settings: () => request<SettingSection[]>("/settings"),
   /** The progress WebSocket: the API's address with ws:// or wss://. */
   queryProgressUrl: (id: string) => `${API_URL.replace(/^http/, "ws")}/queries/${id}/progress`,
   keyframeUrl: (keyframeId: string, attempt = 0) =>

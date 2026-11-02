@@ -619,7 +619,26 @@ The UI follows the Sentinel prototype (dark theme). What works so far:
   search box (every typed word in the question, any order). Open one to see its stored results without searching again, **Run again** to ask it again now, or delete
   it with its results. Everyone using the UI sees the same list (no login yet).
 
-The other screens are placeholders that say which phase builds them.
+- **Triggers** (step 5.5): every trigger with its rule, what it was understood as, its cameras,
+  state (Compiling…, Couldn't compile, Enabled, Disabled) and events; Enable/Disable, Edit,
+  Delete (the dialog says how many events go with it). The builder (`/triggers/new`,
+  `/triggers/{id}`) has four parts: the rule and name (after saving, "Understood as": the action
+  sequences and gap, or "Similar to …"; Compile again on failure); the cameras; the minimum
+  confidence, cooldown, evidence before/after and VLM verification; and **Test and enable**:
+  run the rule on an uploaded video, the last hour, the last 24 hours or a range, see every
+  would-be event (would report, rejected by the VLM, below the confidence) and play its
+  evidence, then Enable.
+- **Events:** the events to review (New by default; Confirmed, Dismissed, All; filters by camera
+  and trigger, also from a trigger's link). An event plays its evidence with the gaps, lists the
+  matched actions, the verification and (live cameras) the alert delay; **Confirm** / **Dismiss**
+  with an optional note (and back to review); **Export** → **Download** of one MP4; Delete.
+- **Live alerts:** every page keeps a connection to `WS /live/events`: a reported event shows a
+  toast "Object left behind · CAM-01 · 14:21" with **View**, and the Events link in the sidebar
+  counts the new events.
+- **Overview:** cameras online, active triggers, events to review, the latest five events and the
+  state of the API, database, video storage, VLM and live ingestion.
+- **Settings:** the main configuration values, read-only (`GET /settings`: no keys or camera
+  addresses); they are changed in `.env`.
 
 Checks: `npm run lint`, `npm test` (unit tests), `npm run build`. CI runs these.
 

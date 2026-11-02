@@ -39,6 +39,13 @@ E2E_ENV = {
     "CAMERA_RELOAD_SECONDS": "5",
     # No VLM calls or embedding models in the UI tests; new segments stay pending.
     "ANALYSIS_ENABLED": "false",
+    # A trigger saved in the browser is compiled by the query worker (5.1): it gets an API backend
+    # on a closed local port and fails at once ("couldn't compile"), never calling OpenRouter or
+    # loading the local model. Tests that need a compiled trigger seed one (tests/e2e_db.py).
+    "VLM_BACKEND": "api",
+    "VLM_BASE_URL": "http://127.0.0.1:9/v1",
+    "VLM_API_KEY": "e2e-no-model",
+    "VLM_MAX_RETRIES": "0",
 }
 READY_TIMEOUT = 90
 

@@ -227,3 +227,184 @@ export interface QuerySnapshot {
   state: QueryState;
   results: EvidenceItem[];
 }
+
+// Phase 5: triggers, trigger tests and events (shared/schemas/trigger.py, event.py).
+
+export type EntityClass = "person" | "vehicle" | "portable_object" | "animal";
+
+/** What the VLM made of a trigger's rule (step 5.1, ADR 0032). */
+export interface CompiledRule {
+  mode: "structured" | "semantic";
+  required_entities: EntityClass[];
+  required_action_sequence: string[];
+  /** Other ways the analysis may describe the same event. */
+  alternative_action_sequences: string[][];
+  maximum_sequence_gap_seconds: number;
+  requires_vlm_verification: boolean;
+  verification_set_by_operator: boolean;
+  search_text: string;
+  source_rule: string;
+  prompt_version: number;
+  model: string | null;
+}
+
+export interface TriggerSettings {
+  minimum_confidence: number;
+  cooldown_seconds: number;
+  pre_roll_seconds: number;
+  post_roll_seconds: number;
+}
+
+export interface Trigger extends TriggerSettings {
+  id: string;
+  name: string;
+  natural_language_rule: string;
+  cameras: { id: string; display_name: string }[];
+  enabled: boolean;
+  compile_status: "pending" | "done" | "failed";
+  compile_error: string | null;
+  compiled: CompiledRule | null;
+  events: { new: number; total: number };
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TriggerInput extends TriggerSettings {
+  name: string;
+  natural_language_rule: string;
+  camera_ids: string[];
+}
+
+export type TriggerUpdate = Partial<TriggerInput> & { requires_vlm_verification?: boolean };
+
+export type TestSource = "video" | "last_hour" | "last_24h" | "range";
+
+export interface TriggerTestInput {
+  source: TestSource;
+  upload_id?: string | null;
+  start?: string | null;
+  end?: string | null;
+}
+
+export type Verdict = "would_report" | "rejected" | "below_confidence";
+
+/** verified, rejected, not_required, unverifiable, not_verified_local, not_checked */
+export interface MatchVerification {
+  status: string;
+  confidence: number | null;
+  reason: string | null;
+}
+
+export interface TestMatch {
+  camera_id: string;
+  camera_name: string;
+  start_time: string;
+  end_time: string;
+  verdict: Verdict;
+  confidence: number;
+  verification: MatchVerification;
+  mode: string;
+  score: number | null;
+  actions: { type: string; start: string; end: string }[];
+  summary: string | null;
+  keyframe_id: string | null;
+  manifest: PlaybackManifest;
+}
+
+export interface TriggerTest {
+  id: string;
+  trigger_id: string;
+  source: TestSource;
+  upload_id: string | null;
+  upload_filename: string | null;
+  camera_ids: string[];
+  start: string;
+  end: string;
+  status: "pending" | "running" | "done" | "failed";
+  stage: string | null;
+  error: string | null;
+  created_at: string;
+  finished_at: string | null;
+  rule: CompiledRule;
+  minimum_confidence: number;
+  cooldown_seconds: number;
+  candidates: number | null;
+  footage_seconds: number | null;
+  counts: Record<Verdict, number>;
+  matches: TestMatch[];
+}
+
+export type EventStatus = "new" | "confirmed" | "dismissed";
+export type ExportStatus = "none" | "running" | "done" | "failed";
+
+/** A reported event (step 5.3); only alerted ones are listed (ADR 0033). */
+export interface EventItem {
+  id: string;
+  trigger_id: string;
+  trigger_name: string;
+  camera_id: string;
+  camera_name: string;
+  start_time: string;
+  end_time: string;
+  confidence: number | null;
+  summary: string | null;
+  status: EventStatus;
+  /** verified, not_required, unverifiable, not_verified_local */
+  verification: string | null;
+  verification_reason: string | null;
+  keyframe_id: string | null;
+  alerted_at: string;
+  acknowledged_at: string | null;
+  note: string | null;
+  export_status: ExportStatus;
+}
+
+export interface EventDetail extends EventItem {
+  mode: string | null;
+  /** Alert time minus the last matched action; live cameras only. */
+  delay_seconds: number | null;
+  details: {
+    matches?: { actions?: { type: string; start: string; end: string }[] }[];
+    [key: string]: unknown;
+  };
+  manifest: PlaybackManifest;
+}
+
+export interface EventList {
+  items: EventItem[];
+  total: number;
+}
+
+export interface EventCounts {
+  new: number;
+  confirmed: number;
+  dismissed: number;
+  total: number;
+}
+
+export interface ExportState {
+  status: ExportStatus;
+  error: string | null;
+  exported_at: string | null;
+  url: string | null;
+  file_name: string | null;
+}
+
+/** What `WS /live/events` sends when an event's alert goes out (step 5.2). */
+export interface LiveNotice {
+  event_id: string;
+  trigger_id: string;
+  trigger_name: string;
+  camera_id: string;
+  camera_name: string;
+  start_time: string;
+  end_time: string;
+  confidence: number | null;
+  summary: string | null;
+  verification: string | null;
+}
+
+export interface SettingSection {
+  title: string;
+  items: { label: string; value: string; env: string }[];
+}
