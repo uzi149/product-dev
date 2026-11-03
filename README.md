@@ -235,7 +235,11 @@ uvicorn services.api.main:app --reload     # http://127.0.0.1:8000  (docs at /do
 - `POST /videos/upload` (camera, start time with timezone, video file): the file is checked
   straight away, staged in MinIO and queued (`202`). A worker keeps only the parts with
   activity (plus 10 s before and after), as browser-playable H.264 segments; the still parts
-  become static periods with a reference frame
+  become static periods with a reference frame. A camera can't hold two scenes at once: a file
+  whose span (start time + its length) overlaps footage already on the camera is refused with
+  `409` and the footage in the way (ADR 0037)
+- `GET /videos/overlap?camera_id=&start=&end=`: that footage for a span (or, without `end`, at
+  an instant); the upload form checks it before sending
 - `GET /videos/uploads?camera_id=`, `GET /videos/uploads/{id}`: upload status (`pending`,
   `processing`, `done`, `failed`) with the number of parts stored or the error
 - `GET /segments`, `GET /segments/{id}`, `GET /segments/{id}/playback`

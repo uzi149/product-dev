@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { API_URL, api, mediaUrl } from "./api";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { API_URL, ApiError, api, mediaUrl, OverlapError } from "./api";
 
 describe("media URLs", () => {
   it("leave out parameters that are null", () => {
@@ -23,5 +23,47 @@ describe("media URLs", () => {
     expect(api.snapshotUrl("c1", at, 2)).toBe(
       `${API_URL}/cameras/c1/snapshot?v=${encodeURIComponent(at)}&r=2`,
     );
+  });
+});
+
+describe("uploadVideo errors", () => {
+  /** An XMLHttpRequest that answers every send with this status and JSON body. */
+  function answer(status: number, body: unknown) {
+    class FakeXhr {
+      status = status;
+      responseText = JSON.stringify(body);
+      upload = { onprogress: null };
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      open() {}
+      send() {
+        this.onload?.();
+      }
+    }
+    vi.stubGlobal("XMLHttpRequest", FakeXhr);
+  }
+  const send = () =>
+    api.uploadVideo(
+      { cameraId: "c1", startTimeIso: "2026-11-02T04:00:00Z", file: new File(["x"], "clip.mpg") },
+      () => {},
+    );
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("turns a 409 with conflicts into an OverlapError", async () => {
+    const conflicts = [{ start: "2026-11-02T04:00:00Z", end: "2026-11-02T04:00:54Z", filename: "video9.avi" }];
+    answer(409, { detail: { message: "Lobby already has footage at this time.", conflicts } });
+    const error = await send().catch((e) => e);
+    expect(error).toBeInstanceOf(OverlapError);
+    expect(error.status).toBe(409);
+    expect(error.conflicts).toEqual(conflicts);
+  });
+
+  it("keeps a plain detail as the message", async () => {
+    answer(422, { detail: "not a readable video: no stream" });
+    const error = await send().catch((e) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).not.toBeInstanceOf(OverlapError);
+    expect(error.message).toBe("not a readable video: no stream");
   });
 });

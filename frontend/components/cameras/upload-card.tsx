@@ -7,15 +7,18 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, OverlapError } from "@/lib/api";
 import { localInputToIso, toLocalInputValue } from "@/lib/format";
 import { invalidateCameraData } from "@/lib/refresh";
-import type { Camera, Upload as UploadRow } from "@/lib/types";
+import type { Camera, FootageConflict, Upload as UploadRow } from "@/lib/types";
 import {
   isFinished,
+  overlapMessage,
   pollWhileRunning,
+  readVideoDuration,
   rejectedUpload,
   rejectedUploadsKey,
+  spanEndIso,
   UPLOAD_POLL_MS,
   uploadSummary,
 } from "@/lib/uploads";
@@ -30,20 +33,57 @@ export function UploadCard({ camera }: { camera: Camera }) {
   // The last upload sent from this card, followed until its background ingestion finishes. The
   // button only waits for the file to be sent (ADR 0018): earlier uploads go on in Recent uploads.
   const [watchingId, setWatchingId] = useState<string | null>(null);
+  // The file's length as the browser reads it: undefined while reading, null when it can't.
+  const [durationMs, setDurationMs] = useState<number | null | undefined>(null);
+  // Footage the API named when it refused the last file sent, for that file and start time.
+  const [refused, setRefused] = useState<{ file: File; start: string; conflicts: FootageConflict[] } | null>(
+    null,
+  );
+
+  const chosen = useRef<File | null>(null);
+
+  function chooseFile(next: File | null) {
+    chosen.current = next;
+    setFile(next);
+    setDurationMs(next ? undefined : null);
+    if (next)
+      readVideoDuration(next).then((ms) => {
+        if (chosen.current === next) setDurationMs(ms);
+      });
+  }
+
+  // Footage already on the camera at this time (ADR 0037): the whole span when the length is
+  // known, otherwise the start time only; the API checks the whole span after sending.
+  const startIso = localInputToIso(start);
+  const endIso = startIso && durationMs ? spanEndIso(startIso, durationMs) : null;
+  const overlap = useQuery({
+    queryKey: ["overlap", camera.id, startIso, endIso],
+    queryFn: () => api.footageOverlap(camera.id, startIso!, endIso),
+    enabled: startIso !== null && durationMs !== undefined,
+  });
+  const conflicts =
+    refused && refused.file === file && refused.start === start ? refused.conflicts : (overlap.data ?? []);
 
   const upload = useMutation({
-    mutationFn: (input: { file: File; startTimeIso: string }) => {
+    mutationFn: (input: { file: File; startTimeIso: string; start: string }) => {
       setProgress(0);
-      return api.uploadVideo({ cameraId: camera.id, ...input }, setProgress);
+      return api.uploadVideo({ cameraId: camera.id, file: input.file, startTimeIso: input.startTimeIso }, setProgress);
     },
     onSuccess: (queued) => {
       setWatchingId(queued.id);
       queryClient.invalidateQueries({ queryKey: ["uploads", camera.id] });
-      setFile(null);
+      queryClient.invalidateQueries({ queryKey: ["overlap", camera.id] });
+      chooseFile(null);
       if (fileInput.current) fileInput.current.value = "";
     },
     onError: (e: Error, input) => {
-      toast.error(e.message);
+      let message = e.message;
+      if (e instanceof OverlapError) {
+        message = overlapMessage(camera.display_name, e.conflicts);
+        setRefused({ file: input.file, start: input.start, conflicts: e.conflicts });
+        queryClient.invalidateQueries({ queryKey: ["overlap", camera.id] });
+      }
+      toast.error(message);
       queryClient.invalidateQueries({ queryKey: ["uploads", camera.id] });
       // A 503 (job queue unreachable) already has its failed row in the API's list.
       if (e instanceof ApiError && e.status === 503) return;
@@ -51,17 +91,17 @@ export function UploadCard({ camera }: { camera: Camera }) {
         cameraId: camera.id,
         filename: input.file.name,
         startTimeIso: input.startTimeIso,
-        error: e.message,
+        error: message,
       });
       queryClient.setQueryData<UploadRow[]>(rejectedUploadsKey(camera.id), (old = []) => [rejected, ...old]);
     },
   });
 
   function send() {
-    const startTimeIso = localInputToIso(start);
     if (!file) toast.error("Choose a video file first");
-    else if (!startTimeIso) toast.error("Enter a valid start date and time");
-    else upload.mutate({ file, startTimeIso });
+    else if (!startIso) toast.error("Enter a valid start date and time");
+    else if (conflicts.length > 0) toast.error(overlapMessage(camera.display_name, conflicts));
+    else upload.mutate({ file, startTimeIso: startIso, start });
   }
 
   const watched = useQuery({
@@ -98,7 +138,7 @@ export function UploadCard({ camera }: { camera: Camera }) {
             ref={fileInput}
             type="file"
             accept="video/*,.mp4,.mov,.mkv,.avi"
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            onChange={(e) => chooseFile(e.target.files?.[0] ?? null)}
           />
         </div>
         <div className="grid gap-1.5">
@@ -112,6 +152,12 @@ export function UploadCard({ camera }: { camera: Camera }) {
         </div>
       </div>
 
+      {conflicts.length > 0 && !upload.isPending && (
+        <p role="alert" className="mt-3 text-[11px] text-destructive">
+          {overlapMessage(camera.display_name, conflicts)}
+        </p>
+      )}
+
       {upload.isPending && (
         <div
           className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted"
@@ -123,7 +169,7 @@ export function UploadCard({ camera }: { camera: Camera }) {
       )}
 
       <div className="mt-3 flex flex-wrap items-center gap-3">
-        <Button onClick={send} disabled={upload.isPending || !file}>
+        <Button onClick={send} disabled={upload.isPending || !file || conflicts.length > 0}>
           <Upload />
           {upload.isPending
             ? progress >= 1

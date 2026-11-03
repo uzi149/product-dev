@@ -1,4 +1,5 @@
-import type { Upload } from "./types";
+import { formatSpan, formatTime } from "./format";
+import type { FootageConflict, Upload } from "./types";
 
 /** How often an unfinished upload is checked again. */
 export const UPLOAD_POLL_MS = 2000;
@@ -37,6 +38,7 @@ export function rejectedUpload(args: {
     camera_id: args.cameraId,
     filename: args.filename,
     start_time: args.startTimeIso,
+    duration_ms: null,
     status: "failed",
     segments_created: null,
     static_periods_created: null,
@@ -101,4 +103,52 @@ export function uploadSummary(upload: Upload): string {
         : `${plural(parts, "active part")} stored`;
     }
   }
+}
+
+/**
+ * Why an upload can't go at this time (ADR 0037): the footage in the way, in local time, and the
+ * times that are free around it.
+ */
+export function overlapMessage(cameraName: string, conflicts: FootageConflict[]): string {
+  const spans = conflicts
+    .map((c) => `${formatSpan(c.start, c.end)}${c.filename ? ` (${c.filename})` : ""}`)
+    .join(", ");
+  const first = conflicts.reduce((a, c) => (Date.parse(c.start) < Date.parse(a) ? c.start : a), conflicts[0].start);
+  const last = conflicts.reduce((a, c) => (Date.parse(c.end) > Date.parse(a) ? c.end : a), conflicts[0].end);
+  return (
+    `${cameraName} already has footage ${spans}. Choose a start time from ${formatTime(last)}, ` +
+    `or one where the video ends by ${formatTime(first)}.`
+  );
+}
+
+/** The end of a file's span on the timeline, when its length is known. */
+export function spanEndIso(startIso: string, durationMs: number | null): string | null {
+  return durationMs === null ? null : new Date(Date.parse(startIso) + durationMs).toISOString();
+}
+
+/**
+ * The video's length as the browser reads it (MP4, MOV, WebM), or null when it can't (AVI, MPG):
+ * then only the start time is checked before sending, and the API checks the whole span.
+ */
+export function readVideoDuration(file: File, timeoutMs = 5000): Promise<number | null> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement("video");
+    let settled = false;
+    const finish = (ms: number | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      video.removeAttribute("src");
+      video.load();
+      URL.revokeObjectURL(url);
+      resolve(ms);
+    };
+    const timer = setTimeout(() => finish(null), timeoutMs);
+    video.preload = "metadata";
+    video.onloadedmetadata = () =>
+      finish(Number.isFinite(video.duration) && video.duration > 0 ? Math.round(video.duration * 1000) : null);
+    video.onerror = () => finish(null);
+    video.src = url;
+  });
 }
