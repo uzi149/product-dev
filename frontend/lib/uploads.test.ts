@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
+import { formatDateTime, formatTime } from "./format";
 import type { Upload } from "./types";
 import {
   isFinished,
   newlyFinished,
+  overlapMessage,
   pollWhileRunning,
   recentUploads,
   rejectedUpload,
+  spanEndIso,
   UPLOAD_POLL_MS,
   uploadStatus,
   uploadSummary,
@@ -16,6 +19,7 @@ const upload = (overrides: Partial<Upload> = {}): Upload => ({
   camera_id: "c1",
   filename: "clip.mp4",
   start_time: "2026-03-07T09:05:00Z",
+  duration_ms: 40_000,
   status: "pending",
   segments_created: null,
   static_periods_created: null,
@@ -133,5 +137,33 @@ describe("newlyFinished", () => {
 
   it("finds nothing on the first load", () => {
     expect(newlyFinished(undefined, [upload({ status: "done" })])).toEqual([]);
+  });
+});
+
+describe("overlapMessage", () => {
+  const video9 = { start: "2026-11-02T04:00:00Z", end: "2026-11-02T04:00:54Z", filename: "video9.avi" };
+
+  it("names the footage in local time and the free times around it", () => {
+    expect(overlapMessage("Lobby", [video9])).toBe(
+      `Lobby already has footage ${formatDateTime(video9.start)} – ${formatTime(video9.end)} (video9.avi). ` +
+        `Choose a start time from ${formatTime(video9.end)}, or one where the video ends by ` +
+        `${formatTime(video9.start)}.`,
+    );
+  });
+
+  it("lists every conflict and frees the time after the last one", () => {
+    const live = { start: "2026-11-02T04:01:00Z", end: "2026-11-02T04:02:00Z", filename: null };
+    const message = overlapMessage("Lobby", [video9, live]);
+    expect(message).toContain("(video9.avi), ");
+    expect(message).not.toContain("(null)");
+    expect(message).toContain(`from ${formatTime(live.end)},`);
+    expect(message).toContain(`ends by ${formatTime(video9.start)}.`);
+  });
+});
+
+describe("spanEndIso", () => {
+  it("adds the file's length to its start, when known", () => {
+    expect(spanEndIso("2026-11-02T04:00:00.000Z", 54_520)).toBe("2026-11-02T04:00:54.520Z");
+    expect(spanEndIso("2026-11-02T04:00:00.000Z", null)).toBeNull();
   });
 });

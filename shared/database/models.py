@@ -220,6 +220,9 @@ class Upload(Base):
     filename: Mapped[str] = mapped_column(Text)
     # The start time the operator entered for the file.
     start_time: Mapped[datetime] = _timestamp()
+    # The file's length from the probe at upload: with start_time, the span of the camera's
+    # timeline it covers (ADR 0037). Null for uploads made before step 5.6.
+    duration_ms: Mapped[int | None] = mapped_column(BigInteger)
     status: Mapped[str] = mapped_column(String(20), server_default=ProcessingStatus.PENDING.value)
     segments_created: Mapped[int | None] = mapped_column(Integer)
     static_periods_created: Mapped[int | None] = mapped_column(Integer)

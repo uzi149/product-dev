@@ -153,6 +153,36 @@ test("add a camera, upload a video, and play the active part that was stored", a
   await expect(timeline.locator("video")).toBeVisible();
 });
 
+test("a second video at a time the camera already has footage for can't be uploaded", async ({ page }) => {
+  const name = unique();
+  await addCamera(page, name);
+
+  const upload = page.locator("section", { hasText: "Upload a video" });
+  const button = upload.getByRole("button", { name: "Upload", exact: true });
+  const warning = upload.getByRole("alert");
+  await upload.getByLabel("Video file").setInputFiles(videoPath);
+  await upload.getByLabel(/Recording started/).fill("2026-03-07T09:05");
+  await expect(warning).toHaveCount(0);
+  await button.click();
+  await expect(upload.getByRole("status")).toContainText("clip.mp4:", { timeout: 30_000 });
+
+  // The same start time: the card names the footage in the way and won't send (ADR 0037).
+  await upload.getByLabel("Video file").setInputFiles(videoPath);
+  await upload.getByLabel(/Recording started/).fill("2026-03-07T09:05");
+  await expect(warning).toContainText(`${name} already has footage`);
+  await expect(warning).toContainText("(clip.mp4)");
+  await expect(button).toBeDisabled();
+
+  // After the first clip's 40 s: free again.
+  await upload.getByLabel(/Recording started/).fill("2026-03-07T09:06");
+  await expect(warning).toHaveCount(0);
+  await expect(button).toBeEnabled();
+  await button.click();
+  await expect(
+    page.locator("section", { hasText: "Recent uploads" }).getByRole("listitem"),
+  ).toHaveCount(2, { timeout: 30_000 });
+});
+
 test("a video where nothing happens stores no footage", async ({ page }) => {
   const name = unique();
   await addCamera(page, name);

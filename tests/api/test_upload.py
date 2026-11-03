@@ -66,6 +66,7 @@ def test_upload_is_staged_and_queued(client, camera_id, burst_video, storage, qu
     assert body["filename"] == "burst.avi"
     assert body["status"] == "pending"
     assert datetime.fromisoformat(body["start_time"]) == datetime(2026, 3, 7, 9, 5, tzinfo=UTC)
+    assert body["duration_ms"] == probe(burst_video).duration_ms
     assert body["segments_created"] is None
     assert queued == [UUID(body["id"])]
     assert storage.exists(upload_key(UUID(body["id"])))
@@ -183,8 +184,11 @@ def test_queue_down_fails_the_upload_and_removes_the_staged_file(
 @needs_ffmpeg
 def test_list_uploads_newest_first_and_by_camera(client, camera_id, burst_video):
     other = client.post("/cameras", json={"display_name": "Other", "source_type": "file"}).json()
+    # One after the other: a camera can't hold two files at the same time (ADR 0037).
     first = upload(client, burst_video, camera_id, name="first.avi").json()
-    second = upload(client, burst_video, camera_id, name="second.avi").json()
+    second = upload(
+        client, burst_video, camera_id, "2026-03-07T10:00:00+00:00", name="second.avi"
+    ).json()
     upload(client, burst_video, other["id"], name="elsewhere.avi")
 
     listed = client.get("/videos/uploads", params={"camera_id": camera_id}).json()

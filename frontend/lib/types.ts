@@ -94,12 +94,22 @@ export interface Upload {
   camera_id: string;
   filename: string;
   start_time: string;
+  /** The file's length; null for uploads from before step 5.6. */
+  duration_ms: number | null;
   status: ProcessingStatus;
   segments_created: number | null;
   static_periods_created: number | null;
   error: string | null;
   created_at: string;
   finished_at: string | null;
+}
+
+/** Footage already on a camera that an upload would overlap (ADR 0037). */
+export interface FootageConflict {
+  start: string;
+  end: string;
+  /** The upload it came from; null for live footage or uploads from before step 5.6. */
+  filename: string | null;
 }
 
 export interface ConnectionTestResult {

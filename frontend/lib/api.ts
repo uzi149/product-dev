@@ -11,6 +11,7 @@ import type {
   EventStatus,
   EvidenceItem,
   ExportState,
+  FootageConflict,
   Health,
   QueryInput,
   QueryList,
@@ -37,6 +38,16 @@ export class ApiError extends Error {
     readonly unreachable = false,
   ) {
     super(message);
+  }
+}
+
+/** The API refused an upload because its time overlaps footage on the camera (HTTP 409, ADR 0037). */
+export class OverlapError extends ApiError {
+  constructor(
+    message: string,
+    readonly conflicts: FootageConflict[],
+  ) {
+    super(message, 409);
   }
 }
 
@@ -186,6 +197,12 @@ export const api = {
   snapshotUrl: (cameraId: string, version: string | null, attempt = 0) =>
     mediaUrl(`/cameras/${cameraId}/snapshot`, { v: version, r: attempt || null }),
   upload: (id: string) => request<Upload>(`/videos/uploads/${id}`),
+  /** Footage on the camera that [start, end) would overlap; without `end`, the footage at `start`. */
+  footageOverlap: (cameraId: string, startIso: string, endIso?: string | null) => {
+    const query = new URLSearchParams({ camera_id: cameraId, start: startIso });
+    if (endIso) query.set("end", endIso);
+    return request<FootageConflict[]>(`/videos/overlap?${query}`);
+  },
   uploads: (cameraId: string) =>
     request<Upload[]>(`/videos/uploads?${new URLSearchParams({ camera_id: cameraId, limit: "10" })}`),
   /**
@@ -220,6 +237,11 @@ export const api = {
           return;
         }
         const detail = (body as { detail?: unknown } | null)?.detail;
+        const overlap = detail as { message?: unknown; conflicts?: unknown } | null;
+        if (xhr.status === 409 && overlap && Array.isArray(overlap.conflicts)) {
+          reject(new OverlapError(String(overlap.message ?? "Overlapping footage"), overlap.conflicts));
+          return;
+        }
         reject(
           new ApiError(typeof detail === "string" ? detail : `Upload failed (${xhr.status})`, xhr.status),
         );
