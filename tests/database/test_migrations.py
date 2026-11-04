@@ -22,6 +22,7 @@ EXPECTED_TABLES = {
     "index_settings",
     "query_evidence",
     "trigger_tests",
+    "evidence_marks",
 }
 
 
@@ -82,6 +83,7 @@ def test_uploads_migration_downgrades_on_its_own(migrated_db, alembic_config):
         "index_settings",
         "query_evidence",
         "trigger_tests",
+        "evidence_marks",
     }
     command.upgrade(alembic_config, "head")
     assert "uploads" in _tables(migrated_db)
@@ -93,6 +95,7 @@ def test_index_settings_migration_downgrades_on_its_own(migrated_db, alembic_con
         "index_settings",
         "query_evidence",
         "trigger_tests",
+        "evidence_marks",
     }
     command.upgrade(alembic_config, "head")
     assert "index_settings" in _tables(migrated_db)
@@ -133,7 +136,11 @@ def test_segment_status_changed_at_starts_at_created_at(migrated_db, alembic_con
 
 def test_query_progress_migration_downgrades_on_its_own(migrated_db, alembic_config):
     command.downgrade(alembic_config, "0005")
-    assert _tables(migrated_db) == EXPECTED_TABLES - {"query_evidence", "trigger_tests"}
+    assert _tables(migrated_db) == EXPECTED_TABLES - {
+        "query_evidence",
+        "trigger_tests",
+        "evidence_marks",
+    }
     engine = create_engine(migrated_db)
     try:
         with engine.connect() as conn:
@@ -200,3 +207,13 @@ def test_trigger_tests_migration_downgrades_on_its_own(migrated_db, alembic_conf
     assert "trigger_tests" not in _tables(migrated_db)
     command.upgrade(alembic_config, "head")
     assert "trigger_tests" in _tables(migrated_db)
+
+
+def test_evidence_marks_migration_downgrades_on_its_own(migrated_db, alembic_config, engine):
+    command.downgrade(alembic_config, "0012")
+    assert "evidence_marks" not in _tables(migrated_db)
+    with engine.connect() as conn:
+        columns = {c["name"] for c in inspect(conn).get_columns("events")}
+    assert "marked_export_status" not in columns
+    command.upgrade(alembic_config, "head")
+    assert "evidence_marks" in _tables(migrated_db)

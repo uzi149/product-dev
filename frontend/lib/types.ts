@@ -378,6 +378,9 @@ export interface EventDetail extends EventItem {
     [key: string]: unknown;
   };
   manifest: PlaybackManifest;
+  /** Step 5.7: the boxes come from GET /events/{id}/marks. */
+  marks_status: MarksStatus;
+  marked_export_status: ExportStatus;
 }
 
 export interface EventList {
@@ -417,4 +420,32 @@ export interface LiveNotice {
 export interface SettingSection {
   title: string;
   items: { label: string; value: string; env: string }[];
+}
+
+/** Evidence marks (step 5.7, ADR 0038). "none": never asked for (or marks are switched off). */
+export type MarksStatus = "none" | "pending" | "running" | "done" | "failed" | "skipped";
+export type EntityKind = "person" | "vehicle" | "portable_object" | "animal";
+
+/** One run of a track in one segment: [ms in the segment, x1, y1, x2, y2] (0-1 of the picture). */
+export interface TrackRun {
+  segment_id: string;
+  points: [number, number, number, number, number][];
+}
+
+export interface MarkTrack {
+  id: number;
+  label: string;
+  kind: EntityKind | null;
+  /** The VLM picked it as one the trigger or question is about (when pick_status is "done"). */
+  picked: boolean;
+  runs: TrackRun[];
+}
+
+export interface MarksState {
+  status: MarksStatus;
+  reason: string | null;
+  /** New marks are on the way (the event was extended); `tracks` are the earlier ones. */
+  updating: boolean;
+  pick_status: "done" | "failed" | "none" | null;
+  tracks: MarkTrack[];
 }

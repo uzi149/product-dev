@@ -23,10 +23,13 @@ class FakeVLM:
     def name(self) -> str:
         return self.model
 
-    def complete(self, frames, prompt, *, system=None, max_tokens=800) -> VLMReply:
-        self.calls.append(
-            {"frames": len(frames), "prompt": prompt, "system": system, "max_tokens": max_tokens}
-        )
+    def complete(
+        self, frames, prompt, *, system=None, max_tokens=800, image_max_side=None
+    ) -> VLMReply:
+        call = {"frames": len(frames), "prompt": prompt, "system": system, "max_tokens": max_tokens}
+        if image_max_side is not None:  # only grounding (step 5.7) sends its own size
+            call["image_max_side"] = image_max_side
+        self.calls.append(call)
         reply = self.replies.pop(0) if len(self.replies) > 1 else self.replies[0]
         if isinstance(reply, VLMError):
             raise reply

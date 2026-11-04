@@ -116,9 +116,14 @@ class LocalTransformersVLM:
         *,
         system: str | None = None,
         max_tokens: int = 800,
+        image_max_side: int | None = None,
     ) -> VLMReply:
-        side = self.image_max_side
-        model, processor = load_model(self.model_name, max_pixels=side * side * 9 // 16)
+        # The processor's pixel limit is fixed when the model is loaded; a larger
+        # `image_max_side` is only a resize here, the processor may scale down again.
+        model, processor = load_model(
+            self.model_name, max_pixels=self.image_max_side * self.image_max_side * 9 // 16
+        )
+        side = image_max_side or self.image_max_side
         try:
             import torch
             from PIL import Image

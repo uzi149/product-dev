@@ -10,6 +10,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
+from shared.schemas.marks import MarksStatusName
 from shared.schemas.query import PlaybackManifest
 
 EventStatusName = Literal["new", "confirmed", "dismissed"]
@@ -44,6 +45,8 @@ class EventDetail(EventRead):
     delay_seconds: float | None  # alert time - the last matched action; live cameras only
     details: dict[str, Any]  # the matches: windows, actions, verification
     manifest: PlaybackManifest
+    marks_status: MarksStatusName = "none"  # step 5.7; the boxes: GET /events/{id}/marks
+    marked_export_status: ExportStatusName = "none"
 
 
 class EventList(BaseModel):

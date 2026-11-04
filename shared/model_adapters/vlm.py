@@ -50,6 +50,10 @@ class VisionLanguageModel(Protocol):
         *,
         system: str | None = None,
         max_tokens: int = 800,
+        image_max_side: int | None = None,
     ) -> VLMReply:
-        """Answer `prompt` about `frames` (BGR images, in order; may be empty). Temperature 0."""
+        """Answer `prompt` about `frames` (BGR images, in order; may be empty). Temperature 0.
+
+        Frames are scaled down to `image_max_side` (the backend's own size when None) before they
+        are sent; grounding (step 5.7) sends larger pictures than a description does."""
         ...

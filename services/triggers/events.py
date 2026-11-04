@@ -11,7 +11,7 @@ checks again every TRIGGER_FINISH_POLL_SECONDS.
 Finishing writes the evidence rows (the stored segments overlapping
 `[start - pre_roll, end + post_roll]`) and, the first time, sends the notice for
 `WS /live/events`. An event extended after its alert gets its evidence rewritten, without a
-second alert.
+second alert. Each time, its marks are asked for again (step 5.7), after the alert.
 """
 
 import logging
@@ -25,6 +25,7 @@ from celery.signals import worker_ready
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from services.marks.state import request_event_marks
 from services.triggers import notices
 from services.triggers.matching import TimedAction, WindowFacts
 from shared.camera_status import CameraStatus, LiveState, get_redis, read_statuses
@@ -38,6 +39,7 @@ from shared.database.models import (
     VideoSegment,
 )
 from shared.database.session import get_sessionmaker
+from shared.jobs import celery_app as jobs
 from shared.jobs.celery_app import DEFAULT_QUEUE, FINISH_EVENT, celery_app
 
 log = logging.getLogger(__name__)
@@ -94,6 +96,8 @@ class FinishTools:
     schedule_finish: Callable[[UUID, float], None]  # event id, seconds from now
     camera_status: Callable[[UUID], CameraStatus | None]
     now: Callable[[], datetime] = lambda: datetime.now(UTC)
+    # Queues the marking of the evidence (step 5.7); tests that don't care leave it out.
+    queue_marks: Callable[[UUID], None] = lambda marks_id: None
 
 
 def default_finish_tools(settings: Settings | None = None) -> FinishTools:
@@ -111,7 +115,15 @@ def default_finish_tools(settings: Settings | None = None) -> FinishTools:
         publish=lambda notice: notices.publish(client, notice),
         schedule_finish=lambda event_id, seconds: queue_finish(event_id, seconds),
         camera_status=camera_status,
+        queue_marks=queue_marks,
     )
+
+
+def queue_marks(marks_id: UUID) -> None:
+    try:
+        jobs.queue_mark_evidence(marks_id)
+    except Exception as error:  # noqa: BLE001 - the alert must go out anyway
+        log.warning("could not queue the marking of %s: %s", marks_id, error)
 
 
 def queue_finish(event_id: UUID, seconds: float) -> None:
@@ -341,6 +353,7 @@ def process_finish(session: Session, event_id: UUID, tools: FinishTools) -> bool
         event.details_json = details
     event.updated_at = now
     message = notice(event, trigger, camera) if first else None
+    marks_id = request_event_marks(session, event, tools.settings) if parts else None
     session.commit()
     log.info(
         "event %s (%s on %s): %d evidence part(s), %s%s",
@@ -353,6 +366,8 @@ def process_finish(session: Session, event_id: UUID, tools: FinishTools) -> bool
     )
     if message is not None:
         tools.publish(message)
+    if marks_id is not None:
+        tools.queue_marks(marks_id)
     return True
 
 

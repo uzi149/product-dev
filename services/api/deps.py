@@ -52,6 +52,11 @@ def get_export_queue() -> Callable[[UUID], None]:
     return jobs.queue_export_event
 
 
+def get_marks_queue() -> Callable[[UUID], None]:
+    """Queues the marking of a clip on the query worker (step 5.7); tests replace it."""
+    return jobs.queue_mark_evidence
+
+
 def get_event_notices() -> EventNotices:
     """Live event notices (Redis pub/sub, step 5.2); tests replace it."""
     return EventNotices()
@@ -66,6 +71,7 @@ __all__ = [
     "get_analysis_queue",
     "get_event_notices",
     "get_export_queue",
+    "get_marks_queue",
     "get_query_events",
     "get_query_queue",
     "get_redis",

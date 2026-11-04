@@ -40,11 +40,12 @@ class Clock:
 
 @dataclass
 class Recorder:
-    """What the finish tools did: notices published, checks scheduled."""
+    """What the finish tools did: notices published, checks scheduled, marks queued."""
 
     notices: list = field(default_factory=list)
     scheduled: list = field(default_factory=list)
     statuses: dict = field(default_factory=dict)
+    marks: list = field(default_factory=list)  # evidence marks queued (step 5.7)
 
 
 @pytest.fixture
@@ -68,6 +69,7 @@ def finish_tools(clock, recorder):
             ),
             camera_status=lambda camera_id: recorder.statuses.get(camera_id),
             now=clock,
+            queue_marks=recorder.marks.append,
         )
 
     return make

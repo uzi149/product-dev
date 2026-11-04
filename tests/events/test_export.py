@@ -1,13 +1,14 @@
 """Exporting an event's evidence as one MP4 with real FFmpeg (step 5.3)."""
 
+import cv2
 import numpy as np
 import pytest
 from sqlalchemy.orm import Session
 
 from services.events.export import EXPORT_FPS, GAP_CARD_SECONDS, gap_card, process_export
-from shared.database.models import Event
+from shared.database.models import Event, EvidenceMarks
 from shared.schemas.query import GapPart
-from shared.storage.keys import export_key, segment_key
+from shared.storage.keys import export_key, marked_export_key, segment_key
 from shared.video.ffmpeg import probe
 from tests.events.conftest import at
 from tests.ingestion.videos import activity_video
@@ -100,3 +101,64 @@ def test_the_gap_card_shows_text_on_a_dark_picture():
     middle = card[140:220]
     assert (middle > 200).any()  # bright text across the middle
     assert np.count_nonzero(card.max(axis=2) > 100) > 500
+
+
+def test_the_marked_export_draws_the_boxes(
+    session, engine, storage, stored_segment, add_event, cleanup_export, tmp_path
+):
+    """Step 5.7: a second file with the marks drawn in; the plain export stays as it was."""
+    segment = stored_segment(0)
+    event = add_event([(segment, 0, 4_000)])
+    cleanup_export(event.id)
+    box = [0.25, 0.25, 0.75, 0.75]
+    points = [[ms, *box] for ms in range(0, 4_001, 200)]
+    session.add(
+        EvidenceMarks(
+            event_id=event.id,
+            status="done",
+            pick_status="none",
+            tracks_json=[{"id": 1, "label": "person", "kind": "person", "picked": False,
+                          "runs": [{"segment_id": str(segment.id), "points": points}]}],
+        )
+    )  # fmt: skip
+    session.commit()
+
+    process_export(event.id, lambda: Session(engine), storage, marked=True)
+    process_export(event.id, lambda: Session(engine), storage)
+
+    session.expire_all()
+    done = session.get(Event, event.id)
+    assert done.marked_export_status == "done" and done.marked_exported_at
+    assert done.marked_export_uri == storage.to_uri(marked_export_key(event.id))
+    assert done.export_status == "done"
+
+    def middle_frame(key):
+        out = tmp_path / key.replace("/", "_")
+        storage.download_file(key, out)
+        capture = cv2.VideoCapture(str(out))
+        capture.set(cv2.CAP_PROP_POS_FRAMES, EXPORT_FPS * 2)
+        ok, frame = capture.read()
+        capture.release()
+        assert ok
+        return frame
+
+    def orange(frame) -> int:
+        """Pixels of the person colour (BGR 0, 140, 255) along the box's top edge."""
+        h, w = frame.shape[:2]
+        edge = frame[int(h * 0.25) - 2 : int(h * 0.25) + 3, int(w * 0.3) : int(w * 0.7)].astype(int)
+        return int(
+            ((edge[..., 2] > 200) & (edge[..., 0] < 80) & (abs(edge[..., 1] - 140) < 50)).sum()
+        )
+
+    assert orange(middle_frame(marked_export_key(event.id))) > 50
+    assert orange(middle_frame(export_key(event.id))) == 0
+    storage.delete(marked_export_key(event.id))
+
+
+def test_the_marked_export_needs_done_marks(session, engine, storage, stored_segment, add_event):
+    event = add_event([(stored_segment(0), 0, 4_000)])
+    process_export(event.id, lambda: Session(engine), storage, marked=True)
+    session.expire_all()
+    failed = session.get(Event, event.id)
+    assert failed.marked_export_status == "failed" and "aren't ready" in failed.marked_export_error
+    assert failed.export_status == "none"

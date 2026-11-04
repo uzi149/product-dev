@@ -82,6 +82,16 @@ class ExportStatus(enum.StrEnum):
     FAILED = "failed"
 
 
+class MarksStatus(enum.StrEnum):
+    """Boxes around the people and objects of a clip (step 5.7, ADR 0038)."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    DONE = "done"
+    FAILED = "failed"
+    SKIPPED = "skipped"  # e.g. the local model: marks are off
+
+
 class QueryStatus(enum.StrEnum):
     PENDING = "pending"
     RUNNING = "running"
@@ -409,6 +419,7 @@ class Event(Base):
     __table_args__ = (
         _one_of("status", EventStatus, "status"),
         _one_of("export_status", ExportStatus, "export_status"),
+        _one_of("marked_export_status", ExportStatus, "marked_export_status"),
         Index("ix_events_alerted_at", "alerted_at"),
         Index("ix_events_trigger_id", "trigger_id"),
         Index("ix_events_camera_id_start_time", "camera_id", "start_time"),
@@ -434,6 +445,13 @@ class Event(Base):
     export_uri: Mapped[str | None] = mapped_column(Text)
     export_error: Mapped[str | None] = mapped_column(Text)
     exported_at: Mapped[datetime | None] = _timestamp(nullable=True)
+    # The same evidence with the marks drawn in (step 5.7), a second file.
+    marked_export_status: Mapped[str] = mapped_column(
+        String(20), server_default=ExportStatus.NONE.value
+    )
+    marked_export_uri: Mapped[str | None] = mapped_column(Text)
+    marked_export_error: Mapped[str | None] = mapped_column(Text)
+    marked_exported_at: Mapped[datetime | None] = _timestamp(nullable=True)
 
     evidence: Mapped[list["EventEvidence"]] = relationship(
         back_populates="event",
@@ -555,6 +573,40 @@ class QueryResult(Base):
     sequence_group_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
 
     session: Mapped[QuerySession] = relationship(back_populates="results")
+
+
+class EvidenceMarks(Base):
+    """Boxes around the people and objects in an event's evidence or a query result (step 5.7,
+    ADR 0038). One row per clip. `tracks_json`: [{"id", "label", "kind", "picked", "runs":
+    [{"segment_id", "points": [[ms in the segment, x1, y1, x2, y2], ...]}]}], boxes 0-1 of the
+    picture. `pick_status`: done (the VLM picked the tracks the clip is about), failed, or none
+    (one track or none). For an event, `evidence_updated_at` is the event's `updated_at` the marks
+    were made for: an older run never overwrites a newer one."""
+
+    __tablename__ = "evidence_marks"
+    __table_args__ = (
+        _one_of("status", MarksStatus, "status"),
+        CheckConstraint("num_nonnulls(event_id, query_evidence_id) = 1", name="one_target"),
+        Index("ix_evidence_marks_event_id", "event_id", unique=True),
+        Index("ix_evidence_marks_query_evidence_id", "query_evidence_id", unique=True),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    event_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"))
+    query_evidence_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("query_evidence.id", ondelete="CASCADE")
+    )
+    status: Mapped[str] = mapped_column(String(20), server_default=MarksStatus.PENDING.value)
+    reason: Mapped[str | None] = mapped_column(Text)
+    model: Mapped[str | None] = mapped_column(Text)
+    prompt_version: Mapped[int | None] = mapped_column(Integer)
+    evidence_updated_at: Mapped[datetime | None] = _timestamp(nullable=True)
+    pick_status: Mapped[str | None] = mapped_column(String(20))
+    keyframes: Mapped[int | None] = mapped_column(Integer)
+    tracks_json: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = _created_at()
+    started_at: Mapped[datetime | None] = _timestamp(nullable=True)
+    finished_at: Mapped[datetime | None] = _timestamp(nullable=True)
 
 
 class IndexSetting(Base):

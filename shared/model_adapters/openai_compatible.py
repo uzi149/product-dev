@@ -79,11 +79,13 @@ class OpenAICompatibleVLM:
         *,
         system: str | None = None,
         max_tokens: int = 800,
+        image_max_side: int | None = None,
     ) -> VLMReply:
+        side = image_max_side or self.image_max_side
         content: list[dict] = [
             {
                 "type": "image_url",
-                "image_url": {"url": jpeg_data_url(resize_max_side(f, self.image_max_side))},
+                "image_url": {"url": jpeg_data_url(resize_max_side(f, side))},
             }
             for f in frames
         ]

@@ -291,6 +291,11 @@ uvicorn services.api.main:app --reload     # http://127.0.0.1:8000  (docs at /do
   "5 minutes 12 seconds not shown" between separated parts; `GET /events/{id}/export` gives its
   status and, when done, a download link. An export is made again only after the event was
   extended.
+- Evidence marks (step 5.7): `GET /events/{id}/marks` and
+  `GET`/`POST /queries/{id}/results/{result_id}/marks` give the boxes around the people and
+  objects (`{status, reason, updating, pick_status, tracks}`; POST asks for a result's marks, once).
+  `POST /events/{id}/export?marks=true` is a second MP4 with them drawn in (409 until they are
+  done).
 
 ## Run a worker
 
@@ -468,6 +473,24 @@ end of the post-roll is stored, the camera stops recording, or at the latest
 an alert comes about 60–90 s after the action (ADR 0033). `TRIGGERS_ENABLED=false` turns
 evaluation off.
 
+## Evidence marks
+
+Event evidence and opened Investigate results show **where** the people and objects are (step
+5.7, ADR 0038): the VLM is asked for boxes about once a second of the clip (at most
+`MARKS_MAX_KEYFRAMES`, 60, sent at 1024 px), the boxes are linked into tracks and followed
+between those pictures with optical flow, and one more call picks the tracks the trigger or
+question is about. The player draws them over the video: the ones the clip is about in colour
+with a label, the others thin and grey; **Marks on/off** hides them. The footage itself never
+changes; an event's export has a second choice, **With marks**, with the boxes drawn in.
+
+- Events are marked by the `query` worker after their alert (the alert never waits), and again
+  when the event is extended; an Investigate result when it is opened. Marks arrive a few minutes
+  after the alert (one VLM call per keyframe).
+- **Off with the local model** (`VLM_BACKEND=local`, or no key): the player says so. With an API
+  key the frames go to that server: test videos only, as for every VLM call.
+- `MARKS_ENABLED=false` switches them off; `VLM_BBOX_FORMAT` (`auto`) is the model's box
+  coordinates: pixels for Qwen2/2.5, a 0–1000 grid for Qwen3.
+
 ## Search
 
 A plain-English query finds the analysed windows that show it (ADR 0023). Inside the camera and
@@ -635,7 +658,10 @@ The UI follows the Sentinel prototype (dark theme). What works so far:
 - **Events:** the events to review (New by default; Confirmed, Dismissed, All; filters by camera
   and trigger, also from a trigger's link). An event plays its evidence with the gaps, lists the
   matched actions, the verification and (live cameras) the alert delay; **Confirm** / **Dismiss**
-  with an optional note (and back to review); **Export** → **Download** of one MP4; Delete.
+  with an optional note (and back to review); **Export** → **Download** of one MP4, *Original* or
+  *With marks*; Delete. Boxes around the people and objects are drawn over the video once the
+  marks are made (step 5.7), with a **Marks on/off** switch; opened Investigate results get them
+  too.
 - **Live alerts:** every page keeps a connection to `WS /live/events`: a reported event shows a
   toast "Object left behind · CAM-01 · 14:21" with **View**, and the Events link in the sidebar
   counts the new events.

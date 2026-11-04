@@ -165,6 +165,10 @@ test("a second video at a time the camera already has footage for can't be uploa
   await expect(warning).toHaveCount(0);
   await button.click();
   await expect(upload.getByRole("status")).toContainText("clip.mp4:", { timeout: 30_000 });
+  // No file chosen: nothing is being uploaded, so no warning, though the start time left in the
+  // form is the uploaded clip's own.
+  await expect(upload.getByRole("status")).toContainText(/stored|No activity/, { timeout: 60_000 });
+  await expect(warning).toHaveCount(0);
 
   // The same start time: the card names the footage in the way and won't send (ADR 0037).
   await upload.getByLabel("Video file").setInputFiles(videoPath);

@@ -162,6 +162,18 @@ class Settings(BaseSettings):
     trigger_test_candidates: int = Field(default=50, gt=0)
     trigger_test_verify_max: int = Field(default=10, ge=0)
 
+    # Evidence marks (step 5.7, ADR 0038): boxes around the people and objects in event evidence
+    # and opened Investigate results, from VLM grounding every MARKS_KEYFRAME_SECONDS (at most
+    # MARKS_MAX_KEYFRAMES per clip, sent at MARKS_IMAGE_MAX_SIDE). Never with the local model.
+    marks_enabled: bool = True
+    marks_keyframe_seconds: float = Field(default=1.0, gt=0)
+    marks_max_keyframes: int = Field(default=60, gt=0)
+    marks_image_max_side: int = Field(default=1024, ge=64)
+    marks_concurrency: int = Field(default=3, ge=1)
+    # Coordinates of the model's boxes: "pixel" (Qwen2/2.5) or "norm1000" (Qwen3 and later);
+    # "auto" decides by the model name.
+    vlm_bbox_format: Literal["auto", "pixel", "norm1000"] = "auto"
+
     # MVP plan §2
     keyframes_per_window: int = Field(default=6, gt=0)
     default_retention_days: int = Field(default=14, gt=0)

@@ -84,6 +84,13 @@ def read_settings() -> list[SettingSection]:
             ("Similarity rules match at", f"{s.trigger_semantic_min_score:g}", "TRIGGER_SEMANTIC_MIN_SCORE"),
             ("Matches verified per test", str(s.trigger_test_verify_max), "TRIGGER_TEST_VERIFY_MAX"),
         ],
+        "Evidence marks": [
+            ("Marks", _on(s.marks_enabled) if backend == "api" else "off with the local model",
+             "MARKS_ENABLED"),
+            ("Boxes asked for every", f"{s.marks_keyframe_seconds:g} s", "MARKS_KEYFRAME_SECONDS"),
+            ("Most pictures per clip", str(s.marks_max_keyframes), "MARKS_MAX_KEYFRAMES"),
+            ("Picture size sent", f"{s.marks_image_max_side} px (longest side)", "MARKS_IMAGE_MAX_SIDE"),
+        ],
         "Retention": [
             ("Footage kept", "14 days by default, set per camera; clean-up comes with Phase 6", "—"),
         ],

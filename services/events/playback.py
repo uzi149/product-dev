@@ -154,6 +154,11 @@ def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", ascii_text.lower()).strip("-") or "event"
 
 
-def export_file_name(trigger_name: str, camera_name: str, start: datetime) -> str:
-    """object-left-behind_cam-01_2026-03-07_092104.mp4 (the time in this machine's zone)."""
-    return f"{_slug(trigger_name)}_{_slug(camera_name)}_{start.astimezone():%Y-%m-%d_%H%M%S}.mp4"
+def export_file_name(
+    trigger_name: str, camera_name: str, start: datetime, marked: bool = False
+) -> str:
+    """object-left-behind_cam-01_2026-03-07_092104.mp4 (the time in this machine's zone);
+    "..._marked.mp4" for the export with the marks drawn in."""
+    suffix = "_marked" if marked else ""
+    time = f"{start.astimezone():%Y-%m-%d_%H%M%S}"
+    return f"{_slug(trigger_name)}_{_slug(camera_name)}_{time}{suffix}.mp4"
