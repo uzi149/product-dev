@@ -24,8 +24,14 @@ var/
 .env
 .venv/
 
+# Live ingestion's rolling buffer and outbox (ingestion_data_dir)
+/data/
+
 # Build artifacts
 *.egg-info/
 
 # Planning docs, ADRs and requirements (kept local, not pushed)
 docs/
+
+# Real test footage for the use cases (kept local, not pushed)
+/test-data/The Real Test Data - according to the use cases required by this product-dev app/

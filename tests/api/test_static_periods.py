@@ -70,6 +70,7 @@ def test_other_cameras_are_not_listed(client, periods):
 def test_reference_frame_redirects_to_the_image(client, periods):
     response = client.get(f"/static-periods/{periods[0]}/reference-frame", follow_redirects=False)
     assert response.status_code == 307
+    assert response.headers["cache-control"] == "no-store"
     assert httpx.get(response.headers["location"]).content == b"\xff\xd8jpeg"
 
 

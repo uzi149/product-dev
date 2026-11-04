@@ -28,8 +28,11 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+      # The CPU build of torch first: PyPI's Linux torch is the much larger CUDA build.
       - name: Install
-        run: pip install -e ".[dev]"
+        run: |
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[dev]"
       - name: Lint
         run: |
           ruff check .

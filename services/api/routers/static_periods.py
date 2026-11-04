@@ -50,4 +50,5 @@ def reference_frame(
     if period.reference_frame_uri is None:
         raise HTTPException(404, "this static period has no reference frame")
     url = storage.presigned_get_url(storage.key_from_uri(period.reference_frame_uri))
-    return RedirectResponse(url, status_code=307)
+    # The presigned URL expires: never let the browser reuse this redirect.
+    return RedirectResponse(url, status_code=307, headers={"Cache-Control": "no-store"})

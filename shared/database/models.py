@@ -6,7 +6,7 @@ Status-like columns are text with a CHECK constraint built from the StrEnums bel
 
 import enum
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from pgvector.sqlalchemy import Vector
@@ -28,7 +28,8 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-# Fixed per installation (ADR 0006): bge-base-en-v1.5 text, siglip-base-patch16-224 image.
+# Both indexes (ADR 0006). The models are fixed per installation and recorded in
+# index_settings (ADR 0020): bge-base-en-v1.5 text, siglip2-base-patch16-224 pictures.
 EMBEDDING_DIM = 768
 
 
@@ -53,10 +54,58 @@ class EmbeddingType(enum.StrEnum):
     DESCRIPTION = "description"
 
 
+class IndexName(enum.StrEnum):
+    TEXT = "text"
+    VISUAL = "visual"
+
+
 class EventStatus(enum.StrEnum):
     NEW = "new"
     CONFIRMED = "confirmed"
     DISMISSED = "dismissed"
+
+
+class CompileStatus(enum.StrEnum):
+    """A trigger's rule compiled into structured criteria (step 5.1, ADR 0032)."""
+
+    PENDING = "pending"
+    DONE = "done"
+    FAILED = "failed"
+
+
+class ExportStatus(enum.StrEnum):
+    """An event's evidence joined into one MP4 on request (step 5.3)."""
+
+    NONE = "none"
+    RUNNING = "running"
+    DONE = "done"
+    FAILED = "failed"
+
+
+class MarksStatus(enum.StrEnum):
+    """Boxes around the people and objects of a clip (step 5.7, ADR 0038)."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    DONE = "done"
+    FAILED = "failed"
+    SKIPPED = "skipped"  # e.g. the local model: marks are off
+
+
+class QueryStatus(enum.StrEnum):
+    PENDING = "pending"
+    RUNNING = "running"
+    DONE = "done"
+    FAILED = "failed"
+
+
+class EvidenceStatus(enum.StrEnum):
+    """A query result: a possible match until the VLM verifies or rejects it (ADR 0029)."""
+
+    POSSIBLE = "possible"
+    VERIFIED = "verified"
+    REJECTED = "rejected"
+    UNVERIFIABLE = "unverifiable"  # the VLM couldn't be asked or gave no usable answer
 
 
 def _one_of(column: str, values: type[enum.StrEnum], name: str) -> CheckConstraint:
@@ -136,11 +185,18 @@ class VideoSegment(Base):
     width: Mapped[int | None] = mapped_column(Integer)
     height: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = _created_at()
+    # When the analysis last changed `status` or made progress: tells a stuck segment from a
+    # running one (step 3.5).
+    status_changed_at: Mapped[datetime] = _created_at()
 
     camera: Mapped[Camera] = relationship(back_populates="segments")
     windows: Mapped[list["AnalysisWindow"]] = relationship(
         back_populates="segment", cascade="all, delete-orphan", passive_deletes=True
     )
+
+    def set_status(self, status: str, at: datetime | None = None) -> None:
+        self.status = status
+        self.status_changed_at = at or datetime.now(UTC)
 
 
 class StaticPeriod(Base):
@@ -174,6 +230,9 @@ class Upload(Base):
     filename: Mapped[str] = mapped_column(Text)
     # The start time the operator entered for the file.
     start_time: Mapped[datetime] = _timestamp()
+    # The file's length from the probe at upload: with start_time, the span of the camera's
+    # timeline it covers (ADR 0037). Null for uploads made before step 5.6.
+    duration_ms: Mapped[int | None] = mapped_column(BigInteger)
     status: Mapped[str] = mapped_column(String(20), server_default=ProcessingStatus.PENDING.value)
     segments_created: Mapped[int | None] = mapped_column(Integer)
     static_periods_created: Mapped[int | None] = mapped_column(Integer)
@@ -213,6 +272,8 @@ class AnalysisWindow(Base):
     processing_status: Mapped[str] = mapped_column(
         String(20), server_default=ProcessingStatus.PENDING.value
     )
+    # Why the window failed (step 3.3); empty otherwise.
+    error: Mapped[str | None] = mapped_column(Text)
 
     segment: Mapped[VideoSegment] = relationship(back_populates="windows")
     keyframes: Mapped[list["Keyframe"]] = relationship(
@@ -273,7 +334,11 @@ class TextEmbedding(Base):
 
 
 class Trigger(Base):
+    """A rule in plain English and the cameras it watches. `compiled_rule_json` is what the VLM
+    made of the rule (step 5.1); it can't be enabled until `compile_status` is done (ADR 0032)."""
+
     __tablename__ = "triggers"
+    __table_args__ = (_one_of("compile_status", CompileStatus, "compile_status"),)
 
     id: Mapped[uuid.UUID] = _uuid_pk()
     name: Mapped[str] = mapped_column(String(200))
@@ -285,6 +350,11 @@ class Trigger(Base):
     post_roll_seconds: Mapped[int] = mapped_column(Integer, server_default=text("20"))
     enabled: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     created_at: Mapped[datetime] = _created_at()
+    compile_status: Mapped[str] = mapped_column(
+        String(20), server_default=CompileStatus.PENDING.value
+    )
+    compile_error: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = _created_at()
 
     cameras: Mapped[list[Camera]] = relationship(secondary="trigger_cameras")
 
@@ -301,10 +371,56 @@ class TriggerCamera(Base):
     )
 
 
+class TriggerTestSource(enum.StrEnum):
+    VIDEO = "video"  # an uploaded file's footage
+    LAST_HOUR = "last_hour"
+    LAST_24H = "last_24h"
+    RANGE = "range"
+
+
+class TriggerTest(Base):
+    """A trigger run on stored footage before it is enabled (scope §12.4, step 5.4, ADR 0035):
+    what it would have reported. Never creates events. `rule_json` is the compiled rule and
+    settings the test used; `results_json` the would-be events with their verdicts."""
+
+    __tablename__ = "trigger_tests"
+    __table_args__ = (
+        _one_of("source", TriggerTestSource, "source"),
+        _one_of("status", QueryStatus, "status"),
+        Index("ix_trigger_tests_trigger_id_created_at", "trigger_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    trigger_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("triggers.id", ondelete="CASCADE"))
+    source: Mapped[str] = mapped_column(String(20))
+    upload_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("uploads.id", ondelete="SET NULL")
+    )
+    camera_ids: Mapped[list[uuid.UUID]] = mapped_column(ARRAY(UUID(as_uuid=True)))
+    start_time: Mapped[datetime] = _timestamp()
+    end_time: Mapped[datetime] = _timestamp()
+    status: Mapped[str] = mapped_column(String(20), server_default=QueryStatus.PENDING.value)
+    stage: Mapped[str | None] = mapped_column(String(20))
+    error: Mapped[str | None] = mapped_column(Text)
+    rule_json: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    results_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = _created_at()
+    finished_at: Mapped[datetime | None] = _timestamp(nullable=True)
+
+
 class Event(Base):
+    """What a trigger reported (step 5.2, ADR 0033). Held while `alerted_at` is empty: the alert
+    waits until the footage up to the post-roll is stored. `details_json` holds the mode, the
+    matched windows and actions, the verification and the alert delay. `updated_at` changes when
+    the event or its evidence changes (an extension), not when it is acknowledged, so an export
+    older than it is out of date (step 5.3)."""
+
     __tablename__ = "events"
     __table_args__ = (
         _one_of("status", EventStatus, "status"),
+        _one_of("export_status", ExportStatus, "export_status"),
+        _one_of("marked_export_status", ExportStatus, "marked_export_status"),
+        Index("ix_events_alerted_at", "alerted_at"),
         Index("ix_events_trigger_id", "trigger_id"),
         Index("ix_events_camera_id_start_time", "camera_id", "start_time"),
         Index("ix_events_end_time", "end_time"),
@@ -320,6 +436,22 @@ class Event(Base):
     summary: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), server_default=EventStatus.NEW.value)
     created_at: Mapped[datetime] = _created_at()
+    details_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    alerted_at: Mapped[datetime | None] = _timestamp(nullable=True)
+    updated_at: Mapped[datetime] = _created_at()
+    acknowledged_at: Mapped[datetime | None] = _timestamp(nullable=True)
+    note: Mapped[str | None] = mapped_column(Text)
+    export_status: Mapped[str] = mapped_column(String(20), server_default=ExportStatus.NONE.value)
+    export_uri: Mapped[str | None] = mapped_column(Text)
+    export_error: Mapped[str | None] = mapped_column(Text)
+    exported_at: Mapped[datetime | None] = _timestamp(nullable=True)
+    # The same evidence with the marks drawn in (step 5.7), a second file.
+    marked_export_status: Mapped[str] = mapped_column(
+        String(20), server_default=ExportStatus.NONE.value
+    )
+    marked_export_uri: Mapped[str | None] = mapped_column(Text)
+    marked_export_error: Mapped[str | None] = mapped_column(Text)
+    marked_exported_at: Mapped[datetime | None] = _timestamp(nullable=True)
 
     evidence: Mapped[list["EventEvidence"]] = relationship(
         back_populates="event",
@@ -352,7 +484,15 @@ class EventEvidence(Base):
 
 
 class QuerySession(Base):
+    """One plain-English query and its progress (steps 4.1-4.4). `stage` is what the UI shows:
+    searching, candidates, verifying, done; `verification` is "on" or "skipped" (local VLM).
+    `request_json` is the request as sent, for Run again (4.6); none before migration 0007."""
+
     __tablename__ = "query_sessions"
+    __table_args__ = (
+        _one_of("status", QueryStatus, "status"),
+        Index("ix_query_sessions_created_at", "created_at"),
+    )
 
     id: Mapped[uuid.UUID] = _uuid_pk()
     query_text: Mapped[str] = mapped_column(Text)
@@ -360,10 +500,56 @@ class QuerySession(Base):
     start_filter: Mapped[datetime | None] = _timestamp(nullable=True)
     end_filter: Mapped[datetime | None] = _timestamp(nullable=True)
     created_at: Mapped[datetime] = _created_at()
+    status: Mapped[str] = mapped_column(String(20), server_default=QueryStatus.PENDING.value)
+    stage: Mapped[str | None] = mapped_column(String(20))
+    search_text: Mapped[str | None] = mapped_column(Text)
+    understood_json: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
+    timezone: Mapped[str | None] = mapped_column(String(64))
+    verification: Mapped[str | None] = mapped_column(String(10))
+    error: Mapped[str | None] = mapped_column(Text)
+    finished_at: Mapped[datetime | None] = _timestamp(nullable=True)
+    request_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
     results: Mapped[list["QueryResult"]] = relationship(
         back_populates="session", cascade="all, delete-orphan", passive_deletes=True
     )
+    evidence: Mapped[list["QueryEvidence"]] = relationship(
+        back_populates="session",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="QueryEvidence.rank",
+    )
+
+
+class QueryEvidence(Base):
+    """One merged result of a query (scope §11): its playback manifest and verification. The id
+    is the `sequence_group_id` of its windows in query_results."""
+
+    __tablename__ = "query_evidence"
+    __table_args__ = (
+        _one_of("status", EvidenceStatus, "status"),
+        Index("ix_query_evidence_query_session_id_rank", "query_session_id", "rank"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    query_session_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("query_sessions.id", ondelete="CASCADE")
+    )
+    rank: Mapped[int] = mapped_column(Integer)
+    camera_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("cameras.id", ondelete="CASCADE"))
+    start_time: Mapped[datetime] = _timestamp()
+    end_time: Mapped[datetime] = _timestamp()
+    score: Mapped[float] = mapped_column(Float)
+    status: Mapped[str] = mapped_column(String(20), server_default=EvidenceStatus.POSSIBLE.value)
+    verification_confidence: Mapped[float | None] = mapped_column(Float)
+    verification_reason: Mapped[str | None] = mapped_column(Text)
+    summary: Mapped[str | None] = mapped_column(Text)
+    keyframe_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("keyframes.id", ondelete="SET NULL")
+    )
+    manifest_json: Mapped[dict[str, Any]] = mapped_column(JSONB)
+
+    session: Mapped[QuerySession] = relationship(back_populates="evidence")
 
 
 class QueryResult(Base):
@@ -387,3 +573,49 @@ class QueryResult(Base):
     sequence_group_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
 
     session: Mapped[QuerySession] = relationship(back_populates="results")
+
+
+class EvidenceMarks(Base):
+    """Boxes around the people and objects in an event's evidence or a query result (step 5.7,
+    ADR 0038). One row per clip. `tracks_json`: [{"id", "label", "kind", "picked", "runs":
+    [{"segment_id", "points": [[ms in the segment, x1, y1, x2, y2], ...]}]}], boxes 0-1 of the
+    picture. `pick_status`: done (the VLM picked the tracks the clip is about), failed, or none
+    (one track or none). For an event, `evidence_updated_at` is the event's `updated_at` the marks
+    were made for: an older run never overwrites a newer one."""
+
+    __tablename__ = "evidence_marks"
+    __table_args__ = (
+        _one_of("status", MarksStatus, "status"),
+        CheckConstraint("num_nonnulls(event_id, query_evidence_id) = 1", name="one_target"),
+        Index("ix_evidence_marks_event_id", "event_id", unique=True),
+        Index("ix_evidence_marks_query_evidence_id", "query_evidence_id", unique=True),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    event_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("events.id", ondelete="CASCADE"))
+    query_evidence_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("query_evidence.id", ondelete="CASCADE")
+    )
+    status: Mapped[str] = mapped_column(String(20), server_default=MarksStatus.PENDING.value)
+    reason: Mapped[str | None] = mapped_column(Text)
+    model: Mapped[str | None] = mapped_column(Text)
+    prompt_version: Mapped[int | None] = mapped_column(Integer)
+    evidence_updated_at: Mapped[datetime | None] = _timestamp(nullable=True)
+    pick_status: Mapped[str | None] = mapped_column(String(20))
+    keyframes: Mapped[int | None] = mapped_column(Integer)
+    tracks_json: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = _created_at()
+    started_at: Mapped[datetime | None] = _timestamp(nullable=True)
+    finished_at: Mapped[datetime | None] = _timestamp(nullable=True)
+
+
+class IndexSetting(Base):
+    """The embedding model each index was built with (ADR 0020), recorded on first use."""
+
+    __tablename__ = "index_settings"
+    __table_args__ = (_one_of("index_name", IndexName, "index_name"),)
+
+    index_name: Mapped[str] = mapped_column(String(20), primary_key=True)
+    model_name: Mapped[str] = mapped_column(String(200))
+    dimensions: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = _created_at()

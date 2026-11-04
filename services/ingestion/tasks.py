@@ -14,7 +14,7 @@ from services.ingestion.file_ingest import ingest_file, remove_objects
 from shared.config import Settings, get_settings
 from shared.database.models import Camera, ProcessingStatus, Upload
 from shared.database.session import get_sessionmaker
-from shared.jobs.celery_app import INGEST_UPLOAD, celery_app
+from shared.jobs.celery_app import INGEST_UPLOAD, celery_app, request_analysis
 from shared.storage import NotFound, StorageClient, StorageError, get_storage
 from shared.storage.keys import upload_key
 from shared.video.ffmpeg import FFmpegError
@@ -82,6 +82,7 @@ def process_upload(
                 upload.static_periods_created = len(result.static_periods)
                 upload.finished_at = datetime.now(UTC)
                 session.commit()
+            request_analysis([segment.id for segment in result.segments], settings)
             log.info(
                 "upload %s: %d segment(s), %d static period(s)",
                 upload_id,

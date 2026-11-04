@@ -20,6 +20,21 @@ export function formatDateTime(iso: string): string {
   });
 }
 
+/** The time of day of an ISO timestamp, in local time: "09:00:54". */
+export function formatTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+/** A span in local time; the end shows only its time when it falls on the same local day. */
+export function formatSpan(startIso: string, endIso: string): string {
+  const sameDay = new Date(startIso).toDateString() === new Date(endIso).toDateString();
+  return `${formatDateTime(startIso)} – ${sameDay ? formatTime(endIso) : formatDateTime(endIso)}`;
+}
+
 /** Value for <input type="datetime-local"> (local time, no seconds) from a Date. */
 export function toLocalInputValue(date: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");

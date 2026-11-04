@@ -5,9 +5,11 @@ hard-coded behaviour. Defaults are the "Initial configuration" values.
 """
 
 from functools import lru_cache
+from pathlib import Path
+from typing import Literal
 from urllib.parse import quote
 
-from pydantic import Field, model_validator
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -33,6 +35,8 @@ class Settings(BaseSettings):
     # Redis
     redis_host: str = "127.0.0.1"
     redis_port: int = 6380
+    # Database number: the job queue, camera status and the ingestion heartbeat all live in it.
+    redis_db: int = Field(default=0, ge=0, le=15)
 
     # MediaMTX (RTSP server)
     mediamtx_host: str = "127.0.0.1"
@@ -40,6 +44,28 @@ class Settings(BaseSettings):
 
     # Encrypts camera source URIs (ADR 0008)
     fernet_key: str = ""
+
+    # Vision-language model (ADR 0019). "auto": the OpenAI-compatible API when a key is set,
+    # otherwise the local model in this process. With a key, frames go to that server: test
+    # videos only; real camera footage needs a local server (vlm_base_url) or no key.
+    vlm_backend: Literal["auto", "api", "local"] = "auto"
+    vlm_base_url: str = "https://openrouter.ai/api/v1"
+    vlm_api_key: SecretStr = SecretStr("")
+    # The reference code's name for the same key; used when VLM_API_KEY is empty.
+    openrouter_api_key: SecretStr = SecretStr("")
+    vlm_model: str = "qwen/qwen3-vl-30b-a3b-instruct"
+    vlm_local_model: str = "Qwen/Qwen2.5-VL-3B-Instruct"
+    # Longest side of every image sent to the model.
+    vlm_image_max_side: int = Field(default=640, ge=64)
+    vlm_timeout_seconds: float = Field(default=180, gt=0)
+    vlm_max_retries: int = Field(default=6, ge=0)
+
+    # Embedding models, always local and fixed per installation (ADR 0020): recorded in
+    # `index_settings` on first use; a process configured for other models is refused.
+    text_embedding_model: str = "BAAI/bge-base-en-v1.5"
+    image_embedding_model: str = "google/siglip2-base-patch16-224"
+    # CPU threads for the embedding models; 0 = half the cores, so FFmpeg and the API keep some.
+    embedding_threads: int = Field(default=0, ge=0)
 
     # API
     max_upload_mb: int = Field(default=2048, gt=0)
@@ -58,12 +84,95 @@ class Settings(BaseSettings):
 
     # Change detection defaults (ADR 0010); cameras override them in `detection_config`.
     detect_pixel_delta: int = Field(default=25, ge=1, le=255)
-    detect_changed_fraction: float = Field(default=0.005, gt=0, le=1)
+    # 0.1 %: a single person in a wide view covers only 0.05-0.3 % of the picture (ADR 0010).
+    detect_changed_fraction: float = Field(default=0.001, gt=0, le=1)
     detect_ssim_threshold: float = Field(default=0.7, gt=0, le=1)
     detect_activation_samples: int = Field(default=2, ge=1)
     detect_background_alpha: float = Field(default=0.05, gt=0, le=1)
     # Frames are downscaled to this width before they're compared.
     detect_width: int = Field(default=320, ge=32)
+
+    # Live ingestion (ADR 0014)
+    # Holds buffer/ (the rolling fragments) and outbox/ (footage waiting for MinIO + PostgreSQL).
+    ingestion_data_dir: Path = Path("data")
+    camera_reload_seconds: int = Field(default=30, gt=0)
+    snapshot_interval_seconds: int = Field(default=5, gt=0)
+    # Frames for change detection and snapshots are scaled down to at most this width.
+    snapshot_width: int = Field(default=960, ge=64)
+    # Long activity is stored as back-to-back segments of at most this length (ADR 0015).
+    max_segment_seconds: int = Field(default=30, gt=0)
+    camera_status_ttl_seconds: int = Field(default=30, gt=0)
+    # No frame for this long and the stream is restarted.
+    stream_stall_seconds: int = Field(default=15, gt=0)
+    reconnect_max_backoff_seconds: int = Field(default=30, gt=0)
+
+    # Automatic VLM analysis of new segments (ADR 0022). Off: ingestion queues nothing and new
+    # segments stay `pending` until `python -m services.analysis.requeue` queues them.
+    analysis_enabled: bool = True
+    # On start, an analysis worker queues the `pending` segments of this many past hours.
+    analysis_sweep_hours: int = Field(default=24, ge=0)
+    # A segment `processing` with no progress for this long is "stuck" and can be retried
+    # (its worker stopped); step 3.5, ADR 0024.
+    analysis_stuck_minutes: int = Field(default=15, gt=0)
+
+    # Hybrid search (step 4.2): candidates from each index and from full-text search, then a
+    # weighted sum of signals mapped to 0-1. The weights are normalised over the signals that
+    # apply to a query (no actions in the query: no action signal; no events: no event signal).
+    query_candidates: int = Field(default=50, gt=0)
+    query_keyword_candidates: int = Field(default=20, ge=0)
+    query_weight_text: float = Field(default=0.45, ge=0)
+    query_weight_visual: float = Field(default=0.25, ge=0)
+    query_weight_keyword: float = Field(default=0.15, ge=0)
+    query_weight_action: float = Field(default=0.15, ge=0)
+    query_weight_event: float = Field(default=0.10, ge=0)
+    # Similarities at or below LOW count as 0, at or above HIGH as 1 (from the acceptance runs:
+    # bge gives matches about 0.62-0.72, SigLIP's text-to-picture scores are much lower).
+    query_text_low: float = 0.45
+    query_text_high: float = 0.75
+    query_visual_low: float = 0.02
+    query_visual_high: float = 0.16
+    # Hits with a lower fused score are dropped, so a query about nothing stored finds nothing.
+    query_min_score: float = Field(default=0.2, ge=0, le=1)
+
+    # Evidence results (step 4.3, scope §11): the best hits get their neighbouring windows, windows
+    # at most MERGE_GAP apart join into one sequence, and sequences on one camera at most
+    # GROUP_GAP apart form one result with explicit gaps (ADR 0027).
+    query_expand_top: int = Field(default=10, gt=0)
+    query_merge_gap_seconds: float = Field(default=2.0, ge=0)
+    query_group_gap_minutes: float = Field(default=10.0, ge=0)
+
+    # Verification (step 4.4, ADR 0029): the best results are checked by the VLM, one at a time,
+    # on up to QUERY_VERIFY_FRAMES of their stored keyframes; verified at this confidence or more.
+    # Skipped when the VLM is the local model.
+    query_verify_top: int = Field(default=5, ge=0)
+    query_verify_frames: int = Field(default=12, gt=0)
+    query_verify_min_confidence: float = Field(default=0.6, ge=0, le=1)
+
+    # Live trigger evaluation (step 5.2, ADR 0033): every analysed window is checked against the
+    # enabled triggers of its camera. Semantic rules match at this hybrid score or more. A match
+    # is held until the footage up to its post-roll is stored: checked every
+    # TRIGGER_FINISH_POLL_SECONDS, at most max_segment_seconds + TRIGGER_FINISH_MARGIN_SECONDS
+    # after the post-roll.
+    triggers_enabled: bool = True
+    trigger_semantic_min_score: float = Field(default=0.6, ge=0, le=1)
+    trigger_finish_poll_seconds: int = Field(default=10, gt=0)
+    trigger_finish_margin_seconds: int = Field(default=30, ge=0)
+    # Trigger tests (step 5.4, ADR 0035): candidates from search, then at most this many
+    # would-be events verified by the VLM.
+    trigger_test_candidates: int = Field(default=50, gt=0)
+    trigger_test_verify_max: int = Field(default=10, ge=0)
+
+    # Evidence marks (step 5.7, ADR 0038): boxes around the people and objects in event evidence
+    # and opened Investigate results, from VLM grounding every MARKS_KEYFRAME_SECONDS (at most
+    # MARKS_MAX_KEYFRAMES per clip, sent at MARKS_IMAGE_MAX_SIDE). Never with the local model.
+    marks_enabled: bool = True
+    marks_keyframe_seconds: float = Field(default=1.0, gt=0)
+    marks_max_keyframes: int = Field(default=60, gt=0)
+    marks_image_max_side: int = Field(default=1024, ge=64)
+    marks_concurrency: int = Field(default=3, ge=1)
+    # Coordinates of the model's boxes: "pixel" (Qwen2/2.5) or "norm1000" (Qwen3 and later);
+    # "auto" decides by the model name.
+    vlm_bbox_format: Literal["auto", "pixel", "norm1000"] = "auto"
 
     # MVP plan §2
     keyframes_per_window: int = Field(default=6, gt=0)
@@ -71,10 +180,16 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _check_windows(self) -> "Settings":
+        if self.query_text_low >= self.query_text_high:
+            raise ValueError("query_text_low must be smaller than query_text_high")
+        if self.query_visual_low >= self.query_visual_high:
+            raise ValueError("query_visual_low must be smaller than query_visual_high")
         if self.window_overlap_seconds >= self.analysis_window_seconds:
             raise ValueError("window_overlap_seconds must be smaller than analysis_window_seconds")
         if self.pre_roll_seconds > self.rolling_buffer_seconds:
             raise ValueError("pre_roll_seconds can't be longer than rolling_buffer_seconds")
+        if self.max_segment_seconds < 2 * self.fragment_seconds:
+            raise ValueError("max_segment_seconds must be at least two fragments")
         return self
 
     @property
@@ -97,12 +212,25 @@ class Settings(BaseSettings):
         return self.minio_public_endpoint or self.minio_endpoint
 
     @property
+    def vlm_key(self) -> str:
+        """The VLM API key: VLM_API_KEY, else OPENROUTER_API_KEY, else empty (local model)."""
+        return self.vlm_api_key.get_secret_value() or self.openrouter_api_key.get_secret_value()
+
+    @property
     def redis_url(self) -> str:
-        return f"redis://{self.redis_host}:{self.redis_port}/0"
+        return f"redis://{self.redis_host}:{self.redis_port}/{self.redis_db}"
 
     @property
     def mediamtx_rtsp_url(self) -> str:
         return f"rtsp://{self.mediamtx_host}:{self.mediamtx_rtsp_port}"
+
+    @property
+    def buffer_dir(self) -> Path:
+        return self.ingestion_data_dir / "buffer"
+
+    @property
+    def outbox_dir(self) -> Path:
+        return self.ingestion_data_dir / "outbox"
 
 
 @lru_cache

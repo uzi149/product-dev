@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+import { E2E_API_URL as API } from "./stack";
+
 const unique = () => `e2e-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 
 let videoPath = "";
@@ -16,9 +17,8 @@ test.beforeAll(async () => {
     expect((await health.json()).status).toBe("ok");
   } catch {
     throw new Error(
-      `The API is not running at ${API}. Start the stack first: docker compose up -d, ` +
-        "alembic upgrade head, uvicorn services.api.main:app, and a worker: " +
-        "celery -A shared.jobs.celery_app worker --pool=solo -Q default",
+      `The e2e API is not answering at ${API}. Playwright starts it (python -m tests.e2e_stack); ` +
+        "see data/e2e/logs/ and check that `docker compose --profile sim up -d` is running.",
     );
   }
   // A test video made with ffmpeg, so no video file is committed: a still grey scene for
@@ -42,7 +42,34 @@ test.beforeAll(async () => {
   ]);
 });
 
+// RTSP cameras made here are disabled at the end, so the e2e ingestion stops trying to read them
+// while the other tests run.
+const rtspCameras: string[] = [];
+
+test.afterAll(async () => {
+  const cameras: { id: string; display_name: string }[] = await (await fetch(`${API}/cameras`)).json();
+  for (const camera of cameras.filter((c) => rtspCameras.includes(c.display_name))) {
+    await fetch(`${API}/cameras/${camera.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: false }),
+    });
+  }
+});
+
+/** A file camera made through the API, without the UI. */
+async function createFileCamera(name: string): Promise<{ id: string }> {
+  const response = await fetch(`${API}/cameras`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ display_name: name, source_type: "file", enabled: true, retention_days: 14 }),
+  });
+  expect(response.status).toBe(201);
+  return response.json();
+}
+
 async function addCamera(page: Page, name: string, rtspUrl?: string) {
+  if (rtspUrl) rtspCameras.push(name);
   await page.goto("/cameras");
   // The camera list only loads after React has hydrated, so clicks before that would be lost.
   await expect(page.getByText("Loading cameras…")).toBeHidden();
@@ -62,15 +89,20 @@ async function addCamera(page: Page, name: string, rtspUrl?: string) {
 test("the shell shows every screen in the sidebar and the API health", async ({ page }) => {
   await page.goto("/");
   const nav = page.locator("aside nav a");
+  // Events may carry the number of new events.
   await expect(nav).toHaveText([
-    "Overview", "Live cameras", "Events", "Investigate", "Triggers", "Cameras", "Settings",
+    "Overview", "Live cameras", /^Events\d*$/, "Investigate", "Triggers", "Cameras", "Settings",
   ]);
   await expect(page.locator("aside").getByText("Operational")).toBeVisible();
 
-  for (const route of ["/live", "/events", "/investigate", "/triggers", "/settings"]) {
+  // Every screen is built (Phase 5): none shows the "Not built yet" placeholder any more.
+  for (const [route, heading] of [["/events", "Events"], ["/triggers", "Triggers"], ["/settings", "Settings"]]) {
     await page.goto(route);
-    await expect(page.getByText("Not built yet")).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: heading })).toBeVisible();
+    await expect(page.getByText("Not built yet")).toHaveCount(0);
   }
+  await page.goto("/investigate");
+  await expect(page.getByLabel("Question")).toBeVisible();
 });
 
 test("add a camera, upload a video, and play the active part that was stored", async ({ page }) => {
@@ -87,7 +119,7 @@ test("add a camera, upload a video, and play the active part that was stored", a
   });
   const recent = page.locator("section", { hasText: "Recent uploads" }).getByRole("listitem");
   await expect(recent).toHaveCount(1);
-  await expect(recent).toContainText("done");
+  await expect(recent).toContainText("Upload processed");
 
   const row = page.locator("section", { hasText: "Stored segments" }).getByRole("listitem");
   await expect(row).toHaveCount(1);
@@ -97,13 +129,62 @@ test("add a camera, upload a video, and play the active part that was stored", a
   await expect(row).toContainText("Mar 07, 2026"); // shown in local time, same day in any timezone offset <= 9h
 
   await row.getByRole("button", { name: "Play" }).click();
-  const video = page.locator("video");
+  const video = row.locator("video");
   await expect(video).toBeVisible();
   await expect
     .poll(() => video.evaluate((v: HTMLVideoElement) => v.readyState >= 2 && v.videoWidth), {
       timeout: 30_000,
     })
     .toBe(640);
+  await row.getByRole("button", { name: "Close" }).click();
+  await expect(video).toHaveCount(0);
+  await expect(row.getByRole("button", { name: "Play" })).toBeVisible();
+
+  // The timeline opens zoomed to the footage of its day: the stored part and the still parts.
+  const timeline = page.getByRole("region", { name: "Timeline" });
+  await expect(timeline.getByRole("button", { name: "Fit" })).toHaveAttribute("aria-pressed", "true");
+  await expect(timeline.getByLabel("Day")).toHaveValue("2026-03-07");
+  await expect(timeline.locator('[data-kind="segment"]')).toHaveCount(1);
+  await expect(timeline.locator('[data-kind="static"]')).toHaveCount(2);
+  await expect(timeline).toContainText("0:26 stored");
+  await timeline.locator('[data-kind="static"]').first().click();
+  await expect(timeline.getByRole("img", { name: /Reference picture/ })).toBeVisible();
+  await timeline.locator('[data-kind="segment"]').click();
+  await expect(timeline.locator("video")).toBeVisible();
+});
+
+test("a second video at a time the camera already has footage for can't be uploaded", async ({ page }) => {
+  const name = unique();
+  await addCamera(page, name);
+
+  const upload = page.locator("section", { hasText: "Upload a video" });
+  const button = upload.getByRole("button", { name: "Upload", exact: true });
+  const warning = upload.getByRole("alert");
+  await upload.getByLabel("Video file").setInputFiles(videoPath);
+  await upload.getByLabel(/Recording started/).fill("2026-03-07T09:05");
+  await expect(warning).toHaveCount(0);
+  await button.click();
+  await expect(upload.getByRole("status")).toContainText("clip.mp4:", { timeout: 30_000 });
+  // No file chosen: nothing is being uploaded, so no warning, though the start time left in the
+  // form is the uploaded clip's own.
+  await expect(upload.getByRole("status")).toContainText(/stored|No activity/, { timeout: 60_000 });
+  await expect(warning).toHaveCount(0);
+
+  // The same start time: the card names the footage in the way and won't send (ADR 0037).
+  await upload.getByLabel("Video file").setInputFiles(videoPath);
+  await upload.getByLabel(/Recording started/).fill("2026-03-07T09:05");
+  await expect(warning).toContainText(`${name} already has footage`);
+  await expect(warning).toContainText("(clip.mp4)");
+  await expect(button).toBeDisabled();
+
+  // After the first clip's 40 s: free again.
+  await upload.getByLabel(/Recording started/).fill("2026-03-07T09:06");
+  await expect(warning).toHaveCount(0);
+  await expect(button).toBeEnabled();
+  await button.click();
+  await expect(
+    page.locator("section", { hasText: "Recent uploads" }).getByRole("listitem"),
+  ).toHaveCount(2, { timeout: 30_000 });
 });
 
 test("a video where nothing happens stores no footage", async ({ page }) => {
@@ -119,12 +200,12 @@ test("a video where nothing happens stores no footage", async ({ page }) => {
   );
   await expect(
     page.locator("section", { hasText: "Recent uploads" }).getByRole("listitem"),
-  ).toContainText("done");
+  ).toContainText("Upload processed");
   await expect(page.getByText("No footage stored for this camera yet.")).toBeVisible();
   await expect(page.getByRole("listitem").filter({ hasText: name })).toContainText("0 segments");
 });
 
-test("an invalid upload shows the API's error and stores nothing", async ({ page }) => {
+test("an invalid upload shows the API's error, lists it as failed and stores nothing", async ({ page }) => {
   const name = unique();
   await addCamera(page, name);
 
@@ -135,7 +216,15 @@ test("an invalid upload shows the API's error and stores nothing", async ({ page
     buffer: Buffer.from("this is not a video"),
   });
   await upload.getByRole("button", { name: "Upload", exact: true }).click();
-  await expect(page.getByText(/not a readable video/)).toBeVisible({ timeout: 30_000 });
+  await expect(
+    page.locator("[data-sonner-toast]").filter({ hasText: /not a readable video/ }),
+  ).toBeVisible({ timeout: 30_000 });
+  // The API stored nothing, but the page lists the rejected file (ADR 0016).
+  const row = page.locator("section", { hasText: "Recent uploads" }).getByRole("listitem");
+  await expect(row).toHaveCount(1);
+  await expect(row).toContainText("notes.mp4");
+  await expect(row).toContainText("Upload failed");
+  await expect(row).toContainText(/Failed: not a readable video/);
   await expect(page.getByText("No footage stored for this camera yet.")).toBeVisible();
 });
 
@@ -167,8 +256,32 @@ test("editing keeps the stream URL write-only", async ({ page }) => {
   );
 });
 
-test("the UI says so when the API is not reachable", async ({ page }) => {
+test("the UI says so when the API is not reachable, and recovers without a reload", async ({ page }) => {
+  const name = unique();
+  await createFileCamera(name);
   await page.route(`${API}/**`, (route) => route.abort());
   await page.goto("/cameras");
-  await expect(page.getByRole("alert").filter({ hasText: "The API is not reachable." })).toBeVisible();
+  const banner = page.getByRole("alert").filter({ hasText: "The API is not reachable." });
+  await expect(banner).toBeVisible();
+  await expect(page.getByText(/Could not load cameras/)).toBeVisible();
+
+  // The API answers again: the next health check reloads what failed (ADR 0017).
+  await page.unroute(`${API}/**`);
+  await expect(banner).toBeHidden({ timeout: 30_000 });
+  await expect(page.getByText(/Could not load cameras/)).toBeHidden();
+  await expect(page.getByRole("listitem").filter({ hasText: name })).toBeVisible();
+});
+
+test("a picked camera stays selected after a reload", async ({ page }) => {
+  const first = unique();
+  const camera = await createFileCamera(first);
+  await addCamera(page, unique());
+
+  await page.getByRole("listitem").filter({ hasText: first }).getByRole("button").first().click();
+  await expect(page).toHaveURL(new RegExp(`/cameras\\?camera=${camera.id}$`));
+  const upload = page.locator("section", { hasText: "Upload a video" });
+  await expect(upload).toContainText(`stored for ${first}`);
+
+  await page.reload();
+  await expect(upload).toContainText(`stored for ${first}`);
 });

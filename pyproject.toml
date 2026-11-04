@@ -26,23 +26,29 @@ dependencies = [
     "celery[redis]>=5.4",
     # Encrypts camera source URIs
     "cryptography>=43",
+    # Time zones for query phrases such as "yesterday" (zoneinfo has no data on Windows)
+    "tzdata>=2024.1",
     # Video
     "opencv-python>=4.10",
     "numpy>=1.26",
-    # HTTP client for the OpenAI-compatible VLM server (vLLM); also used by FastAPI's TestClient
+    # HTTP client for the OpenAI-compatible VLM API (OpenRouter, or vLLM on the pilot); also used by FastAPI's TestClient
     "httpx>=0.27",
+    # Local models: the embedding models, which always run locally (ADR 0020), and the
+    # in-process Qwen-VL fallback when no VLM key is set (ADR 0019). On Linux, install the CPU
+    # build of torch (see the README) unless the machine has a GPU.
+    "torch>=2.4",
+    # Transformers 5 loads Qwen-VL's video processor with the image one; it needs torchvision.
+    "torchvision>=0.19",
+    "transformers>=4.56",
+    "pillow>=10.0",
 ]
 
 [project.optional-dependencies]
-# In-process Qwen-VL for laptop development (scope §4 "Development VLM").
-vlm = [
-    "torch>=2.4",
-    "transformers>=4.49",
-    "pillow>=10.0",
-]
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
+    # Ground-truth files of the acceptance tests (already installed with uvicorn[standard]).
+    "pyyaml>=6.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -53,6 +59,8 @@ testpaths = ["tests"]
 markers = [
     "integration: needs the Docker Compose services running",
     "models: loads AI models or calls a hosted API (skipped in CI)",
+    "live: streams through the MediaMTX RTSP server for a minute or more",
+    "acceptance: phase acceptance tests on known videos (run by hand, with the models)",
 ]
 
 [tool.ruff]

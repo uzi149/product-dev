@@ -69,6 +69,20 @@ class CameraUpdate(BaseModel):
         return None if value is None else normalise_detection_config(value)
 
 
+LiveStateName = Literal["connecting", "online", "offline", "disabled", "not_running", "unknown"]
+
+
+class LiveStatus(BaseModel):
+    """Status of an RTSP camera, kept in Redis by live ingestion (`shared.camera_status`)."""
+
+    state: LiveStateName
+    since: datetime | None = None
+    activity: bool = False
+    last_frame_at: datetime | None = None
+    last_snapshot_at: datetime | None = None
+    error: str | None = None
+
+
 class CameraRead(BaseModel):
     """The source URI is never returned, only a masked form for display."""
 
@@ -85,6 +99,8 @@ class CameraRead(BaseModel):
     has_source_uri: bool
     source_uri_masked: str | None = None
     segment_count: int = 0
+    # RTSP cameras only; None for file cameras.
+    live: LiveStatus | None = None
 
 
 class ConnectionTestResult(BaseModel):
@@ -92,3 +108,15 @@ class ConnectionTestResult(BaseModel):
     width: int | None = None
     height: int | None = None
     error: str | None = None
+
+
+class DeletePreview(BaseModel):
+    """What deleting a camera removes, and why it can't be deleted now (`blocker`), if so."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    segments: int
+    static_periods: int
+    analysed_windows: int
+    uploads: int
+    blocker: str | None

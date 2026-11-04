@@ -1,5 +1,6 @@
 """Shared fixtures. Database tests use a scratch database, never the development one."""
 
+import os
 import socket
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from shared.config import Settings
+from shared.jobs import celery_app as jobs
 from shared.storage import StorageClient
 
 TEST_DB = "sentinel_test"
@@ -19,7 +21,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def pytest_collection_modifyitems(items):
+    # Model tests download gigabytes or make paid API calls: only on request (CI never runs them).
+    run_models = os.environ.get("RUN_MODEL_TESTS") == "1"
+    skip_models = pytest.mark.skip(
+        reason="loads AI models or calls a hosted API: RUN_MODEL_TESTS=1"
+    )
     for item in items:
+        if "models" in item.keywords and not run_models:
+            item.add_marker(skip_models)
         node = item.nodeid.replace("\\", "/")
         if node.startswith(
             (
@@ -27,9 +36,30 @@ def pytest_collection_modifyitems(items):
                 "tests/api",
                 "tests/ingestion/test_file_ingest",
                 "tests/ingestion/test_tasks",
+                "tests/ingestion/test_live_pipeline",
+                "tests/ingestion/test_live_rtsp",
+                "tests/ingestion/test_outbox",
+                "tests/ingestion/test_supervisor",
+                "tests/analysis/test_analyze_segment",
+                "tests/analysis/test_queueing",
+                "tests/analysis/test_inspect",
+                "tests/analysis/test_retry",
+                "tests/search/test_retrieval",
+                "tests/search/test_hybrid",
+                "tests/search/test_evidence",
+                "tests/query",
+                "tests/search/test_search_command",
             )
         ):
             item.add_marker(pytest.mark.integration)
+
+
+@pytest.fixture(autouse=True)
+def analysis_queue(monkeypatch) -> list:
+    """Segment ids queued for analysis. No test ever sends to the real Redis queue."""
+    queued: list = []
+    monkeypatch.setattr(jobs, "queue_analyze_segment", queued.append)
+    return queued
 
 
 def _admin_connect(settings: Settings) -> psycopg.Connection:

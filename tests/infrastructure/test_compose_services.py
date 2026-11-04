@@ -3,7 +3,10 @@
 Marked `integration`; each test is skipped when its service is not reachable.
 """
 
+import shutil
 import socket
+import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -12,6 +15,7 @@ from shared.config import Settings
 pytestmark = pytest.mark.integration
 
 settings = Settings()
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def _skip_unless_open(host: str, port: int) -> None:
@@ -53,3 +57,35 @@ def test_redis_answers_ping():
 
 def test_mediamtx_accepts_rtsp_connections():
     _skip_unless_open(settings.mediamtx_host, settings.mediamtx_rtsp_port)
+
+
+def test_sim_profile_is_valid():
+    docker = shutil.which("docker")
+    if docker is None:
+        pytest.skip("docker is not installed")
+    result = subprocess.run(
+        [docker, "compose", "--profile", "sim", "config", "--quiet"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("path", ["cam-01", "cam-02"])
+def test_sim_cameras_stream_h264_when_the_profile_runs(path):
+    _skip_unless_open(settings.mediamtx_host, settings.mediamtx_rtsp_port)
+    ffprobe = shutil.which("ffprobe")
+    if ffprobe is None:
+        pytest.skip("ffprobe is not installed")
+    result = subprocess.run(
+        [ffprobe, "-v", "error", "-rtsp_transport", "tcp", "-select_streams", "v",
+         "-show_entries", "stream=codec_name", "-of", "csv=p=0",
+         f"{settings.mediamtx_rtsp_url}/{path}"],
+        capture_output=True, text=True, timeout=30, check=False,
+    )  # fmt: skip
+    if result.returncode != 0:
+        pytest.skip("the sim cameras are not running (docker compose --profile sim up -d)")
+    assert result.stdout.strip() == "h264"

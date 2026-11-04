@@ -19,6 +19,10 @@ EXPECTED_TABLES = {
     "query_sessions",
     "query_results",
     "uploads",
+    "index_settings",
+    "query_evidence",
+    "trigger_tests",
+    "evidence_marks",
 }
 
 
@@ -74,6 +78,142 @@ def test_indexes_from_scope_5_3_exist(engine):
 
 def test_uploads_migration_downgrades_on_its_own(migrated_db, alembic_config):
     command.downgrade(alembic_config, "0001")
-    assert _tables(migrated_db) == EXPECTED_TABLES - {"uploads"}
+    assert _tables(migrated_db) == EXPECTED_TABLES - {
+        "uploads",
+        "index_settings",
+        "query_evidence",
+        "trigger_tests",
+        "evidence_marks",
+    }
     command.upgrade(alembic_config, "head")
     assert "uploads" in _tables(migrated_db)
+
+
+def test_index_settings_migration_downgrades_on_its_own(migrated_db, alembic_config):
+    command.downgrade(alembic_config, "0002")
+    assert _tables(migrated_db) == EXPECTED_TABLES - {
+        "index_settings",
+        "query_evidence",
+        "trigger_tests",
+        "evidence_marks",
+    }
+    command.upgrade(alembic_config, "head")
+    assert "index_settings" in _tables(migrated_db)
+
+
+def test_segment_status_changed_at_starts_at_created_at(migrated_db, alembic_config):
+    command.downgrade(alembic_config, "0004")
+    engine = create_engine(migrated_db)
+    try:
+        with engine.begin() as conn:
+            camera = conn.execute(
+                text(
+                    "INSERT INTO cameras (display_name, source_type) VALUES ('m', 'file') "
+                    "RETURNING id"
+                )
+            ).scalar_one()
+            conn.execute(
+                text(
+                    "INSERT INTO video_segments (camera_id, start_time, end_time, duration_ms, "
+                    "storage_uri, created_at) VALUES (:camera, now(), now(), 1000, 's3://x', "
+                    "'2026-01-02T03:04:05Z')"
+                ),
+                {"camera": camera},
+            )
+        command.upgrade(alembic_config, "head")
+        with engine.connect() as conn:
+            same = conn.execute(
+                text("SELECT status_changed_at = created_at FROM video_segments")
+            ).scalar_one()
+        assert same
+        command.downgrade(alembic_config, "0004")
+        with engine.connect() as conn:
+            columns = {c["name"] for c in inspect(conn).get_columns("video_segments")}
+        assert "status_changed_at" not in columns
+    finally:
+        engine.dispose()
+
+
+def test_query_progress_migration_downgrades_on_its_own(migrated_db, alembic_config):
+    command.downgrade(alembic_config, "0005")
+    assert _tables(migrated_db) == EXPECTED_TABLES - {
+        "query_evidence",
+        "trigger_tests",
+        "evidence_marks",
+    }
+    engine = create_engine(migrated_db)
+    try:
+        with engine.connect() as conn:
+            columns = {c["name"] for c in inspect(conn).get_columns("query_sessions")}
+        assert "status" not in columns and "query_text" in columns
+    finally:
+        engine.dispose()
+    command.upgrade(alembic_config, "head")
+    assert "query_evidence" in _tables(migrated_db)
+
+
+def test_query_history_migration_downgrades_on_its_own(migrated_db, alembic_config):
+    command.downgrade(alembic_config, "0006")
+    engine = create_engine(migrated_db)
+    try:
+        with engine.connect() as conn:
+            columns = {c["name"] for c in inspect(conn).get_columns("query_sessions")}
+        assert "request_json" not in columns and "status" in columns
+    finally:
+        engine.dispose()
+    command.upgrade(alembic_config, "head")
+
+
+def test_trigger_compilation_migration_downgrades_on_its_own(migrated_db, alembic_config):
+    command.downgrade(alembic_config, "0007")
+    engine = create_engine(migrated_db)
+    try:
+        with engine.connect() as conn:
+            columns = {c["name"] for c in inspect(conn).get_columns("triggers")}
+        assert "compile_status" not in columns and "natural_language_rule" in columns
+    finally:
+        engine.dispose()
+    command.upgrade(alembic_config, "head")
+
+
+def test_event_details_migration_downgrades_on_its_own(migrated_db, alembic_config):
+    command.downgrade(alembic_config, "0008")
+    engine = create_engine(migrated_db)
+    try:
+        with engine.connect() as conn:
+            columns = {c["name"] for c in inspect(conn).get_columns("events")}
+        assert "alerted_at" not in columns and "details_json" not in columns
+        assert "summary" in columns
+    finally:
+        engine.dispose()
+    command.upgrade(alembic_config, "head")
+
+
+def test_event_review_migration_downgrades_on_its_own(migrated_db, alembic_config):
+    command.downgrade(alembic_config, "0009")
+    engine = create_engine(migrated_db)
+    try:
+        with engine.connect() as conn:
+            columns = {c["name"] for c in inspect(conn).get_columns("events")}
+        assert "export_status" not in columns and "note" not in columns
+        assert "alerted_at" in columns
+    finally:
+        engine.dispose()
+    command.upgrade(alembic_config, "head")
+
+
+def test_trigger_tests_migration_downgrades_on_its_own(migrated_db, alembic_config):
+    command.downgrade(alembic_config, "0010")
+    assert "trigger_tests" not in _tables(migrated_db)
+    command.upgrade(alembic_config, "head")
+    assert "trigger_tests" in _tables(migrated_db)
+
+
+def test_evidence_marks_migration_downgrades_on_its_own(migrated_db, alembic_config, engine):
+    command.downgrade(alembic_config, "0012")
+    assert "evidence_marks" not in _tables(migrated_db)
+    with engine.connect() as conn:
+        columns = {c["name"] for c in inspect(conn).get_columns("events")}
+    assert "marked_export_status" not in columns
+    command.upgrade(alembic_config, "head")
+    assert "evidence_marks" in _tables(migrated_db)

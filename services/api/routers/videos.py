@@ -1,7 +1,7 @@
 import logging
 import tempfile
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -10,9 +10,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from services.api.deps import get_session, get_storage_client, get_upload_queue
+from services.ingestion.overlap import Conflict, footage_conflicts
 from shared.config import get_settings
 from shared.database.models import Camera, ProcessingStatus, Upload
-from shared.schemas.upload import UploadRead
+from shared.schemas.upload import FootageConflict, UploadRead
 from shared.storage import StorageClient
 from shared.storage.keys import upload_key
 from shared.video.ffmpeg import FFmpegError, FFmpegNotInstalled, probe
@@ -36,6 +37,15 @@ def _save_upload(upload: UploadFile, dest: Path, max_bytes: int) -> None:
         raise HTTPException(422, "the file is empty")
 
 
+def _conflict_out(conflict: Conflict) -> dict:
+    return FootageConflict.model_validate(conflict).model_dump(mode="json")
+
+
+def _require_aware(value: datetime, name: str) -> None:
+    if value.tzinfo is None:
+        raise HTTPException(422, f"{name} must include a timezone, e.g. 2026-01-01T12:00:00Z")
+
+
 @router.post("/upload", response_model=UploadRead, status_code=202)
 def upload_video(
     file: UploadFile = File(...),
@@ -49,13 +59,16 @@ def upload_video(
 
     The file is checked straight away (a non-video is rejected here), staged in MinIO and
     queued. Follow the result with GET /videos/uploads/{id}.
+
+    Refused with 409 when the file's span (start time + its length) overlaps footage already on
+    the camera (ADR 0037); the detail lists that footage.
     """
     if session.get(Camera, camera_id) is None:
         raise HTTPException(404, "camera not found")
     if start_time is None:
         start_time = datetime.now(UTC)
-    elif start_time.tzinfo is None:
-        raise HTTPException(422, "start_time must include a timezone, e.g. 2026-01-01T12:00:00Z")
+    else:
+        _require_aware(start_time, "start_time")
 
     max_bytes = get_settings().max_upload_mb * 1024 * 1024
     upload_id = uuid4()
@@ -71,6 +84,25 @@ def upload_video(
             raise HTTPException(422, f"not a readable video: {error}") from error
         if info.duration_ms <= 0:
             raise HTTPException(422, "the video has no duration")
+
+        # Locked until the upload row is committed: two files sent together can't both pass.
+        camera = session.scalars(
+            select(Camera).where(Camera.id == camera_id).with_for_update()
+        ).one_or_none()
+        if camera is None:
+            raise HTTPException(404, "camera not found")
+        end_time = start_time + timedelta(milliseconds=info.duration_ms)
+        conflicts = footage_conflicts(session, camera_id, start_time, end_time)
+        if conflicts:
+            session.rollback()
+            raise HTTPException(
+                409,
+                {
+                    "message": f"{camera.display_name} already has footage at this time. "
+                    "Choose a start time outside it.",
+                    "conflicts": [_conflict_out(c) for c in conflicts],
+                },
+            )
         storage.upload_file(key, raw, content_type=file.content_type or "application/octet-stream")
 
     upload = Upload(
@@ -78,6 +110,7 @@ def upload_video(
         camera_id=camera_id,
         filename=(file.filename or "upload")[:255],
         start_time=start_time,
+        duration_ms=info.duration_ms,
         status=ProcessingStatus.PENDING,
     )
     try:
@@ -100,6 +133,25 @@ def upload_video(
         raise HTTPException(503, "the job queue is not reachable; try again later") from error
     session.refresh(upload)
     return upload
+
+
+@router.get("/overlap", response_model=list[FootageConflict])
+def overlap(
+    camera_id: UUID,
+    start: datetime,
+    end: datetime | None = None,
+    session: Session = Depends(get_session),
+) -> list[Conflict]:
+    """Footage on the camera that [start, end) would overlap, earliest first (ADR 0037). Without
+    `end`, the footage running at `start`. The upload form checks this before sending a file."""
+    if session.get(Camera, camera_id) is None:
+        raise HTTPException(404, "camera not found")
+    _require_aware(start, "start")
+    if end is not None:
+        _require_aware(end, "end")
+        if end < start:
+            raise HTTPException(422, "end must not be before start")
+    return footage_conflicts(session, camera_id, start, end)
 
 
 @router.get("/uploads", response_model=list[UploadRead])

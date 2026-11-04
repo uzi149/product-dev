@@ -2,6 +2,19 @@
 
 export type SourceType = "rtsp" | "file";
 
+/** Live camera status from `python -m services.ingestion` (RTSP cameras only). */
+export type LiveState = "connecting" | "online" | "offline" | "disabled" | "not_running" | "unknown";
+
+export interface LiveStatus {
+  state: LiveState;
+  since: string | null;
+  /** The change detector is in an active interval right now. */
+  activity: boolean;
+  last_frame_at: string | null;
+  last_snapshot_at: string | null;
+  error: string | null;
+}
+
 export interface Camera {
   id: string;
   display_name: string;
@@ -14,6 +27,8 @@ export interface Camera {
   has_source_uri: boolean;
   source_uri_masked: string | null;
   segment_count: number;
+  /** null for file cameras. */
+  live: LiveStatus | null;
 }
 
 export interface CameraInput {
@@ -26,6 +41,15 @@ export interface CameraInput {
 
 export type CameraUpdate = Partial<Omit<CameraInput, "source_type">>;
 
+/** What deleting a camera removes; `blocker` says why it can't be deleted now (ADR 0026). */
+export interface DeletePreview {
+  segments: number;
+  static_periods: number;
+  analysed_windows: number;
+  uploads: number;
+  blocker: string | null;
+}
+
 export type ProcessingStatus = "pending" | "processing" | "done" | "failed";
 
 export interface Segment {
@@ -35,11 +59,33 @@ export interface Segment {
   end_time: string;
   duration_ms: number;
   activity_score: number | null;
-  status: "pending" | "processing" | "done" | "failed";
+  /** The analysis state. */
+  status: ProcessingStatus;
   codec: string | null;
   width: number | null;
   height: number | null;
   created_at: string;
+  /** Failed, or stuck in `processing` (its worker stopped): it can be analysed again. */
+  retryable: boolean;
+}
+
+/** Segments per analysis state; `processing` leaves out the stuck ones. */
+export interface StatusCounts {
+  pending: number;
+  processing: number;
+  stuck: number;
+  done: number;
+  failed: number;
+}
+
+/** A stretch where the camera saw no change (`ok`), or could not be reached (`offline`). */
+export interface StaticPeriod {
+  id: string;
+  camera_id: string;
+  start_time: string;
+  end_time: string;
+  health_status: "ok" | "offline";
+  has_reference_frame: boolean;
 }
 
 /** An uploaded file and its background ingestion (only the active parts are stored). */
@@ -48,12 +94,22 @@ export interface Upload {
   camera_id: string;
   filename: string;
   start_time: string;
+  /** The file's length; null for uploads from before step 5.6. */
+  duration_ms: number | null;
   status: ProcessingStatus;
   segments_created: number | null;
   static_periods_created: number | null;
   error: string | null;
   created_at: string;
   finished_at: string | null;
+}
+
+/** Footage already on a camera that an upload would overlap (ADR 0037). */
+export interface FootageConflict {
+  start: string;
+  end: string;
+  /** The upload it came from; null for live footage or uploads from before step 5.6. */
+  filename: string | null;
 }
 
 export interface ConnectionTestResult {
@@ -63,8 +119,333 @@ export interface ConnectionTestResult {
   error: string | null;
 }
 
+/** Where analysis sends the frames: an API host (OpenRouter, a local vLLM) or the local model. */
+export interface VlmBackend {
+  kind: "api" | "local";
+  host: string | null;
+}
+
 export interface Health {
   status: "ok" | "degraded";
   database: boolean;
   storage: boolean;
+  vlm_backend: VlmBackend;
+}
+
+/** A plain-English query (step 4.4). Chosen cameras and times win over the ones in the text. */
+export interface QueryInput {
+  query_text: string;
+  camera_ids?: string[] | null;
+  start?: string | null;
+  end?: string | null;
+  /** The browser's IANA time zone, for "yesterday" and the like. */
+  timezone: string;
+  /** false: keep camera names / time words as search text (a removed chip). */
+  parse_cameras?: boolean;
+  parse_times?: boolean;
+}
+
+/** What the query was understood as: a chip in the UI. */
+export interface Understood {
+  kind: "camera" | "time";
+  label: string;
+  camera_id: string | null;
+}
+
+export type QueryStage = "searching" | "candidates" | "verifying" | "done";
+
+export interface QueryCounts {
+  candidates: number;
+  to_verify: number;
+  verified: number;
+  rejected: number;
+  unverifiable: number;
+  possible: number;
+}
+
+export interface QueryState {
+  id: string;
+  query_text: string;
+  search_text: string | null;
+  understood: Understood[];
+  camera_ids: string[] | null;
+  start: string | null;
+  end: string | null;
+  status: "pending" | "running" | "done" | "failed";
+  stage: QueryStage | null;
+  /** "skipped" when the VLM is the local model (ADR 0029). */
+  verification: "on" | "skipped" | null;
+  error: string | null;
+  created_at: string;
+  finished_at: string | null;
+  counts: QueryCounts;
+  /** The request as sent (step 4.6), for Run again and removing a chip. */
+  request: Required<QueryInput>;
+}
+
+/** Query history, newest first (step 4.6). */
+export interface QueryList {
+  items: QueryState[];
+  total: number;
+}
+
+export interface VideoPart {
+  type: "video";
+  camera_id: string;
+  segment_id: string;
+  source_start_ms: number;
+  source_end_ms: number;
+  start_time: string;
+  end_time: string;
+}
+
+/** Footage between two parts that is not shown (scope §11). */
+export interface GapPart {
+  type: "gap";
+  duration_ms: number;
+}
+
+export interface PlaybackManifest {
+  result_id: string;
+  camera_id: string;
+  start_time: string;
+  end_time: string;
+  parts: (VideoPart | GapPart)[];
+}
+
+export type EvidenceStatus = "possible" | "verified" | "rejected" | "unverifiable";
+
+/** One merged result of a query, best first. */
+export interface EvidenceItem {
+  id: string;
+  rank: number;
+  camera_id: string;
+  camera_name: string;
+  start_time: string;
+  end_time: string;
+  score: number;
+  status: EvidenceStatus;
+  verification_confidence: number | null;
+  verification_reason: string | null;
+  summary: string | null;
+  keyframe_id: string | null;
+  manifest: PlaybackManifest;
+}
+
+/** What the progress WebSocket sends after every change. */
+export interface QuerySnapshot {
+  state: QueryState;
+  results: EvidenceItem[];
+}
+
+// Phase 5: triggers, trigger tests and events (shared/schemas/trigger.py, event.py).
+
+export type EntityClass = "person" | "vehicle" | "portable_object" | "animal";
+
+/** What the VLM made of a trigger's rule (step 5.1, ADR 0032). */
+export interface CompiledRule {
+  mode: "structured" | "semantic";
+  required_entities: EntityClass[];
+  required_action_sequence: string[];
+  /** Other ways the analysis may describe the same event. */
+  alternative_action_sequences: string[][];
+  maximum_sequence_gap_seconds: number;
+  requires_vlm_verification: boolean;
+  verification_set_by_operator: boolean;
+  search_text: string;
+  source_rule: string;
+  prompt_version: number;
+  model: string | null;
+}
+
+export interface TriggerSettings {
+  minimum_confidence: number;
+  cooldown_seconds: number;
+  pre_roll_seconds: number;
+  post_roll_seconds: number;
+}
+
+export interface Trigger extends TriggerSettings {
+  id: string;
+  name: string;
+  natural_language_rule: string;
+  cameras: { id: string; display_name: string }[];
+  enabled: boolean;
+  compile_status: "pending" | "done" | "failed";
+  compile_error: string | null;
+  compiled: CompiledRule | null;
+  events: { new: number; total: number };
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TriggerInput extends TriggerSettings {
+  name: string;
+  natural_language_rule: string;
+  camera_ids: string[];
+}
+
+export type TriggerUpdate = Partial<TriggerInput> & { requires_vlm_verification?: boolean };
+
+export type TestSource = "video" | "last_hour" | "last_24h" | "range";
+
+export interface TriggerTestInput {
+  source: TestSource;
+  upload_id?: string | null;
+  start?: string | null;
+  end?: string | null;
+}
+
+export type Verdict = "would_report" | "rejected" | "below_confidence";
+
+/** verified, rejected, not_required, unverifiable, not_verified_local, not_checked */
+export interface MatchVerification {
+  status: string;
+  confidence: number | null;
+  reason: string | null;
+}
+
+export interface TestMatch {
+  camera_id: string;
+  camera_name: string;
+  start_time: string;
+  end_time: string;
+  verdict: Verdict;
+  confidence: number;
+  verification: MatchVerification;
+  mode: string;
+  score: number | null;
+  actions: { type: string; start: string; end: string }[];
+  summary: string | null;
+  keyframe_id: string | null;
+  manifest: PlaybackManifest;
+}
+
+export interface TriggerTest {
+  id: string;
+  trigger_id: string;
+  source: TestSource;
+  upload_id: string | null;
+  upload_filename: string | null;
+  camera_ids: string[];
+  start: string;
+  end: string;
+  status: "pending" | "running" | "done" | "failed";
+  stage: string | null;
+  error: string | null;
+  created_at: string;
+  finished_at: string | null;
+  rule: CompiledRule;
+  minimum_confidence: number;
+  cooldown_seconds: number;
+  candidates: number | null;
+  footage_seconds: number | null;
+  counts: Record<Verdict, number>;
+  matches: TestMatch[];
+}
+
+export type EventStatus = "new" | "confirmed" | "dismissed";
+export type ExportStatus = "none" | "running" | "done" | "failed";
+
+/** A reported event (step 5.3); only alerted ones are listed (ADR 0033). */
+export interface EventItem {
+  id: string;
+  trigger_id: string;
+  trigger_name: string;
+  camera_id: string;
+  camera_name: string;
+  start_time: string;
+  end_time: string;
+  confidence: number | null;
+  summary: string | null;
+  status: EventStatus;
+  /** verified, not_required, unverifiable, not_verified_local */
+  verification: string | null;
+  verification_reason: string | null;
+  keyframe_id: string | null;
+  alerted_at: string;
+  acknowledged_at: string | null;
+  note: string | null;
+  export_status: ExportStatus;
+}
+
+export interface EventDetail extends EventItem {
+  mode: string | null;
+  /** Alert time minus the last matched action; live cameras only. */
+  delay_seconds: number | null;
+  details: {
+    matches?: { actions?: { type: string; start: string; end: string }[] }[];
+    [key: string]: unknown;
+  };
+  manifest: PlaybackManifest;
+  /** Step 5.7: the boxes come from GET /events/{id}/marks. */
+  marks_status: MarksStatus;
+  marked_export_status: ExportStatus;
+}
+
+export interface EventList {
+  items: EventItem[];
+  total: number;
+}
+
+export interface EventCounts {
+  new: number;
+  confirmed: number;
+  dismissed: number;
+  total: number;
+}
+
+export interface ExportState {
+  status: ExportStatus;
+  error: string | null;
+  exported_at: string | null;
+  url: string | null;
+  file_name: string | null;
+}
+
+/** What `WS /live/events` sends when an event's alert goes out (step 5.2). */
+export interface LiveNotice {
+  event_id: string;
+  trigger_id: string;
+  trigger_name: string;
+  camera_id: string;
+  camera_name: string;
+  start_time: string;
+  end_time: string;
+  confidence: number | null;
+  summary: string | null;
+  verification: string | null;
+}
+
+export interface SettingSection {
+  title: string;
+  items: { label: string; value: string; env: string }[];
+}
+
+/** Evidence marks (step 5.7, ADR 0038). "none": never asked for (or marks are switched off). */
+export type MarksStatus = "none" | "pending" | "running" | "done" | "failed" | "skipped";
+export type EntityKind = "person" | "vehicle" | "portable_object" | "animal";
+
+/** One run of a track in one segment: [ms in the segment, x1, y1, x2, y2] (0-1 of the picture). */
+export interface TrackRun {
+  segment_id: string;
+  points: [number, number, number, number, number][];
+}
+
+export interface MarkTrack {
+  id: number;
+  label: string;
+  kind: EntityKind | null;
+  /** The VLM picked it as one the trigger or question is about (when pick_status is "done"). */
+  picked: boolean;
+  runs: TrackRun[];
+}
+
+export interface MarksState {
+  status: MarksStatus;
+  reason: string | null;
+  /** New marks are on the way (the event was extended); `tracks` are the earlier ones. */
+  updating: boolean;
+  pick_status: "done" | "failed" | "none" | null;
+  tracks: MarkTrack[];
 }

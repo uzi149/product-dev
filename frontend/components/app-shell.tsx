@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
   Camera,
@@ -12,10 +12,21 @@ import {
   Zap,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { onlineCount } from "@/lib/live";
+import { LIST_POLL_MS, refetchFailed } from "@/lib/refresh";
+import type { LiveNotice } from "@/lib/types";
+import { useLiveEvents } from "@/lib/use-live-events";
 import { cn } from "@/lib/utils";
+
+/** "Object left behind · CAM-01 · 14:21" */
+export function noticeTitle(notice: LiveNotice): string {
+  const time = new Date(notice.start_time).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  return `${notice.trigger_name} · ${notice.camera_name} · ${time}`;
+}
 
 const NAV = [
   {
@@ -46,9 +57,39 @@ function isActive(pathname: string, href: string) {
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
+  const queryClient = useQueryClient();
 
   const health = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 15_000 });
-  const cameras = useQuery({ queryKey: ["cameras"], queryFn: api.cameras });
+  const cameras = useQuery({ queryKey: ["cameras"], queryFn: api.cameras, refetchInterval: LIST_POLL_MS });
+  const eventCounts = useQuery({
+    queryKey: ["event-counts"],
+    queryFn: api.eventCounts,
+    refetchInterval: LIST_POLL_MS,
+  });
+
+  // A reported event: a toast that opens it, and every list that shows events reloads (5.5).
+  const router = useRouter();
+  useLiveEvents((notice) => {
+    toast(noticeTitle(notice), {
+      description: notice.summary ?? undefined,
+      duration: 15_000,
+      action: { label: "View", onClick: () => router.push(`/events/${notice.event_id}`) },
+    });
+    for (const key of ["events", "event-counts", "triggers", "trigger"]) {
+      queryClient.invalidateQueries({ queryKey: [key] });
+    }
+  });
+
+  // The API answers again: reload what failed while it was down instead of waiting for each
+  // list's next poll (some, like a watched upload, stop polling after an error).
+  const wasUnreachable = useRef(false);
+  useEffect(() => {
+    if (health.isError) wasUnreachable.current = true;
+    else if (health.isSuccess && wasUnreachable.current) {
+      wasUnreachable.current = false;
+      refetchFailed(queryClient);
+    }
+  }, [health.isError, health.isSuccess, queryClient]);
 
   const unreachable = health.isError;
   const degraded = health.data?.status === "degraded";
@@ -61,6 +102,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         : "Operational";
   const healthy = !unreachable && !degraded && !health.isPending;
   const current = ALL_ITEMS.find((i) => isActive(pathname, i.href));
+  const live = cameras.data ? onlineCount(cameras.data) : null;
+  const newEvents = eventCounts.data?.new ?? 0;
 
   return (
     <div className="grid min-h-screen lg:grid-cols-[228px_minmax(0,1fr)]">
@@ -100,6 +143,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 >
                   <Icon className="size-4" />
                   {label}
+                  {href === "/live" && live && live.total > 0 && (
+                    <span
+                      title="Live cameras online"
+                      className={cn(
+                        "ml-auto rounded-full px-1.5 py-0.5 font-mono text-[10px]",
+                        live.online < live.total ? "bg-red/15 text-[#ff8984]" : "bg-green/10 text-green",
+                      )}
+                    >
+                      {live.online}/{live.total}
+                    </span>
+                  )}
+                  {href === "/events" && newEvents > 0 && (
+                    <span
+                      title="Events to review"
+                      aria-label={`${newEvents} new events`}
+                      className="ml-auto rounded-full bg-orange/15 px-1.5 py-0.5 font-mono text-[10px] text-orange"
+                    >
+                      {newEvents}
+                    </span>
+                  )}
                 </Link>
               ))}
             </nav>

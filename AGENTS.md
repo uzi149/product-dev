@@ -25,8 +25,13 @@ How to use it:
   `shared/model_adapters/` or `shared/video/`.
 - Take only what the task needs. Leave out its YOLO-World, ByteTracker, visualizers,
   Flask webapp, CLI and LangChain wrappers.
-- Remove anything that sends footage off the local network, such as the hosted
-  OpenRouter default. A local vLLM server is the default endpoint here.
+- Keep the reference code's VLM backend choice: the OpenRouter API is the default when its
+  key is set, and the local in-process model is the fallback when it isn't (ADR 0019). Keep
+  the endpoint configurable (`VLM_BASE_URL`) so the pilot can point it at a local vLLM server.
+  Only test videos may be analysed through OpenRouter; real camera footage stays on the local
+  network.
+- Embeddings always run locally (ADR 0020); don't add a hosted embedding service or a
+  run-time fallback between embedding models.
 
 ## Naming rule: no reference-repo name in this codebase
 
@@ -72,7 +77,10 @@ time. For every step, follow this order:
    `docs/MVP-implementation-plan.md` to reflect the decisions, and link the step plan
    and its ADRs from it.
 5. **Get approval, then code.** Start coding only after the user approves the step plan.
-   Commit the step plan and ADRs on the same feature branch as the code.
+
+`docs/` is git-ignored and stays on the local machine. Write and update the step plans, ADRs,
+the MVP plan and the testing guide there, but never commit or push anything under `docs/`, and
+don't change `.gitignore` to track it. A PR can say that its plan and ADRs are local.
 
 If a new decision comes up while coding, stop, ask, then add the ADR and update both plans
 before continuing.
@@ -87,11 +95,13 @@ before continuing.
 - `main` is for releases only. When a release is needed, `develop` is merged into
   `main` through a release PR.
 - Never commit or push directly to `develop` or `main`.
+- Never commit or push `docs/` (see "MVP workflow" above).
 
 ## Project context
 
 - Requirements: `docs/Local VLM Camera Intelligence Platform — Technical Scope.pdf`
 - Open decisions and answers: `docs/MVP-open-questions.md`; settled decisions go in `docs/ADRs/`
 - Python 3.12, `venv` + `pip`, dependencies in `pyproject.toml`
-  (`pip install -e ".[dev]"`, add `vlm` for local Qwen). After changing dependencies,
+  (`pip install -e ".[dev]"`, which includes torch and transformers for the local models; on
+  Linux install the CPU build of torch first, see the README). After changing dependencies,
   regenerate `requirements.lock` with `pip freeze --exclude-editable > requirements.lock`.
