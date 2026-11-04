@@ -3,6 +3,7 @@
 POST reads the cameras and times out of the text (4.1) at once, stores the query and queues it
 for the query worker (ADR 0028); GET and the WebSocket show its progress and results. The history
 (step 4.6, ADR 0031): the list newest first, Run again, and delete with everything the query made.
+A result is marked (boxes around its people and objects, step 5.7) when the operator opens it.
 """
 
 from collections import Counter
@@ -23,11 +24,21 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
-from services.api.deps import get_query_events, get_query_queue, get_session
+from services.api.deps import get_marks_queue, get_query_events, get_query_queue, get_session
+from services.marks.state import marks_state, request_result_marks
 from services.query_engine.filters import CameraRef, apply_explicit, parse_query
 from services.query_engine.progress import QueryEvents
 from shared.config import get_settings
-from shared.database.models import Camera, EvidenceStatus, QueryEvidence, QuerySession, QueryStatus
+from shared.database.models import (
+    Camera,
+    EvidenceMarks,
+    EvidenceStatus,
+    MarksStatus,
+    QueryEvidence,
+    QuerySession,
+    QueryStatus,
+)
+from shared.schemas.marks import MarksState
 from shared.schemas.query import (
     EvidenceItem,
     PlaybackManifest,
@@ -273,6 +284,50 @@ def get_results(
 ) -> list[EvidenceItem]:
     """Best first. Rejected results are left out unless asked for (ADR 0029)."""
     return query_results(session, _get_query(session, query_id), include_rejected)
+
+
+def _get_result(session: Session, query_id: UUID, result_id: UUID) -> QueryEvidence:
+    _get_query(session, query_id)
+    evidence = session.get(QueryEvidence, result_id)
+    if evidence is None or evidence.query_session_id != query_id:
+        raise HTTPException(404, "result not found")
+    return evidence
+
+
+@router.post("/{query_id}/results/{result_id}/marks", response_model=MarksState, status_code=202)
+def mark_result(
+    query_id: UUID,
+    result_id: UUID,
+    session: Session = Depends(get_session),
+    queue=Depends(get_marks_queue),
+) -> MarksState:
+    """Mark the result the operator opened (step 5.7). Asking again while it runs, or after it is
+    done, changes nothing; a failed one is tried again. With the local model: skipped."""
+    evidence = _get_result(session, query_id, result_id)
+    row, queue_it = request_result_marks(session, evidence, get_settings())
+    session.commit()
+    if queue_it:
+        try:
+            queue(row.id)
+        except Exception as error:  # noqa: BLE001 - any broker failure
+            row.status = MarksStatus.FAILED
+            row.reason = "the marking queue is not reachable"
+            session.commit()
+            raise HTTPException(
+                503, f"the marking queue is not reachable (is Redis running?): {error}"
+            )
+    return marks_state(row)
+
+
+@router.get("/{query_id}/results/{result_id}/marks", response_model=MarksState)
+def get_result_marks(
+    query_id: UUID, result_id: UUID, session: Session = Depends(get_session)
+) -> MarksState:
+    evidence = _get_result(session, query_id, result_id)
+    row = session.scalars(
+        select(EvidenceMarks).where(EvidenceMarks.query_evidence_id == evidence.id)
+    ).first()
+    return marks_state(row)
 
 
 @router.websocket("/{query_id}/progress")

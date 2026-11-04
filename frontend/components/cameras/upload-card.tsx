@@ -53,16 +53,21 @@ export function UploadCard({ camera }: { camera: Camera }) {
   }
 
   // Footage already on the camera at this time (ADR 0037): the whole span when the length is
-  // known, otherwise the start time only; the API checks the whole span after sending.
+  // known, otherwise the start time only; the API checks the whole span after sending. Only for
+  // a chosen file: without one nothing is being uploaded, so there is nothing to warn about (the
+  // start time left from the last upload would otherwise "overlap" that upload's own footage).
   const startIso = localInputToIso(start);
   const endIso = startIso && durationMs ? spanEndIso(startIso, durationMs) : null;
   const overlap = useQuery({
     queryKey: ["overlap", camera.id, startIso, endIso],
     queryFn: () => api.footageOverlap(camera.id, startIso!, endIso),
-    enabled: startIso !== null && durationMs !== undefined,
+    enabled: file !== null && startIso !== null && durationMs !== undefined,
   });
-  const conflicts =
-    refused && refused.file === file && refused.start === start ? refused.conflicts : (overlap.data ?? []);
+  const conflicts = !file
+    ? []
+    : refused && refused.file === file && refused.start === start
+      ? refused.conflicts
+      : (overlap.data ?? []);
 
   const upload = useMutation({
     mutationFn: (input: { file: File; startTimeIso: string; start: string }) => {

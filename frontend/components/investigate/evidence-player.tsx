@@ -1,11 +1,19 @@
 "use client";
 
-import { RotateCcw, SkipForward } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Eye, EyeOff, RotateCcw, SkipForward } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { MarksOverlay } from "@/components/investigate/marks-overlay";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
+import {
+  legend,
+  marksWording,
+  readMarksVisible,
+  subscribeMarksVisible,
+  writeMarksVisible,
+} from "@/lib/marks";
 import { barWidths, clock, gapWording, playlist } from "@/lib/queries";
-import type { PlaybackManifest } from "@/lib/types";
+import type { MarksState, PlaybackManifest } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 /** How long the "… not shown" card stays before the next part plays. */
@@ -15,14 +23,27 @@ export const GAP_CARD_MS = 2_000;
  * Plays a result's parts in order (scope §11). A part that follows a gap is announced with a
  * "5 minutes 12 seconds not shown" card, so separated footage never looks continuous. Plays a
  * query result, an event (5.3) or a trigger test's match (5.4): anything with a manifest.
+ *
+ * With `marks` (step 5.7), the boxes around the people and objects are drawn over the video; the
+ * Marks switch hides them (remembered in this browser).
  */
-export function EvidencePlayer({ result }: { result: { manifest: PlaybackManifest } }) {
+export function EvidencePlayer({
+  result,
+  marks,
+}: {
+  result: { manifest: PlaybackManifest };
+  marks?: MarksState;
+}) {
   const entries = useMemo(() => playlist(result.manifest), [result.manifest]);
   const widths = useMemo(() => barWidths(entries), [entries]);
   const videoCount = entries.filter((e) => e.kind === "video").length;
   const [index, setIndex] = useState(0);
   const [ended, setEnded] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
+  // On in the server's HTML; the browser's choice once hydrated.
+  const marksVisible = useSyncExternalStore(subscribeMarksVisible, readMarksVisible, () => true);
+  const toggleMarks = () => writeMarksVisible(!marksVisible);
+  const hasMarks = (marks?.tracks.length ?? 0) > 0;
 
   const entry = entries[index];
   // The video part on screen: the current one, or (during a gap card) the one before it.
@@ -86,6 +107,9 @@ export function EvidencePlayer({ result }: { result: { manifest: PlaybackManifes
           }}
           className="mx-auto aspect-video max-h-[420px] w-full"
         />
+        {marks && hasMarks && marksVisible && !ended && entry.kind === "video" && (
+          <MarksOverlay videoRef={videoRef} segmentId={shown.segmentId} marks={marks} />
+        )}
         {entry.kind === "gap" && !ended && (
           <div
             role="status"
@@ -143,6 +167,39 @@ export function EvidencePlayer({ result }: { result: { manifest: PlaybackManifes
           ? `Gap · ${gapWording(entry.durationMs)} not shown`
           : `Part ${entry.number} of ${videoCount} · ${clock(entry.startTime)}–${clock(entry.endTime)}`}
       </p>
+      {marks && marks.status !== "none" && (
+        <div className="flex flex-wrap items-center gap-2 text-xs" aria-label="Marks">
+          {hasMarks && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              aria-pressed={marksVisible}
+              onClick={toggleMarks}
+            >
+              {marksVisible ? <Eye /> : <EyeOff />} Marks {marksVisible ? "on" : "off"}
+            </Button>
+          )}
+          {hasMarks && marksVisible && (
+            <ul className="flex flex-wrap gap-2" aria-label="Legend">
+              {legend(marks).map((item) => (
+                <li key={`${item.label}-${item.colour}`} className="inline-flex items-center gap-1">
+                  <span
+                    aria-hidden="true"
+                    className={cn("inline-block size-2.5 rounded-sm border-2", !item.strong && "border")}
+                    style={{ borderColor: item.colour }}
+                  />
+                  {item.label}
+                </li>
+              ))}
+            </ul>
+          )}
+          {/* Announced, but not a second "status": the gap card is the player's status. */}
+          <span aria-live="polite" className="text-muted-foreground">
+            {marksWording(marks)}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

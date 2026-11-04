@@ -3,7 +3,10 @@
 Only alerted events are shown: a held event waits for its post-roll footage (ADR 0033). The
 evidence plays through a playback manifest like a query result's (scope §11); an export joins it
 into one MP4 with "… not shown" cards between separated parts. Deleting an event removes its
-evidence rows and export file; its footage is then no longer protected (ADR 0034).
+evidence rows and export files; its footage is then no longer protected (ADR 0034).
+
+Marks (step 5.7, ADR 0038): `GET /events/{id}/marks` gives the boxes the player draws; an export
+`?marks=true` is a second MP4 with them drawn in, once the marks are done.
 """
 
 from datetime import UTC, datetime
@@ -20,7 +23,16 @@ from services.events.playback import (
     evidence_rows,
     export_file_name,
 )
-from shared.database.models import Camera, Event, EventStatus, ExportStatus, Trigger
+from services.marks.state import marks_state
+from shared.database.models import (
+    Camera,
+    Event,
+    EventStatus,
+    EvidenceMarks,
+    ExportStatus,
+    MarksStatus,
+    Trigger,
+)
 from shared.schemas.event import (
     Acknowledge,
     EventCounts,
@@ -29,8 +41,9 @@ from shared.schemas.event import (
     EventRead,
     ExportState,
 )
+from shared.schemas.marks import MarksState
 from shared.storage import StorageClient
-from shared.storage.keys import export_key
+from shared.storage.keys import export_key, marked_export_key
 
 router = APIRouter(prefix="/events", tags=["events"])
 
@@ -75,9 +88,37 @@ def _read(event: Event, trigger: str, camera: str, keyframe: UUID | None) -> dic
     }
 
 
-def _stale(event: Event) -> bool:
-    """The export was made before the event was last extended."""
-    return event.exported_at is None or event.exported_at < event.updated_at
+def _marks(session: Session, event: Event) -> EvidenceMarks | None:
+    return session.scalars(select(EvidenceMarks).where(EvidenceMarks.event_id == event.id)).first()
+
+
+class _Export:
+    """The plain export's columns, or the marked one's (step 5.7)."""
+
+    def __init__(self, event: Event, marked: bool):
+        self.event = event
+        self.prefix = "marked_export" if marked else "export"
+        self.at = "marked_exported_at" if marked else "exported_at"
+
+    def get(self, name: str):
+        return getattr(self.event, f"{self.prefix}_{name}")
+
+    def set(self, name: str, value) -> None:
+        setattr(self.event, f"{self.prefix}_{name}", value)
+
+    @property
+    def exported_at(self) -> datetime | None:
+        return getattr(self.event, self.at)
+
+
+def _stale(event: Event, marked: bool = False, marks: EvidenceMarks | None = None) -> bool:
+    """The export was made before the event was last extended (or, with marks, before the marks
+    were last made)."""
+    exported_at = _Export(event, marked).exported_at
+    if exported_at is None or exported_at < event.updated_at:
+        return True
+    made = marks.finished_at if marked and marks is not None else None
+    return made is not None and exported_at < made
 
 
 @router.get("", response_model=EventList)
@@ -145,7 +186,16 @@ def get_event(event_id: UUID, session: Session = Depends(get_session)) -> EventD
         delay_seconds=details.get("delay_seconds") if live else None,
         details=details,
         manifest=event_manifest(event, evidence_rows(session, event.id)),
+        marks_status=marks_state(_marks(session, event)).status,
+        marked_export_status=event.marked_export_status,
     )
+
+
+@router.get("/{event_id}/marks", response_model=MarksState)
+def get_marks(event_id: UUID, session: Session = Depends(get_session)) -> MarksState:
+    """The boxes around the people and objects of the evidence (step 5.7)."""
+    event, _, _ = _get(session, event_id)
+    return marks_state(_marks(session, event))
 
 
 @router.post("/{event_id}/acknowledge", response_model=EventRead)
@@ -163,16 +213,24 @@ def acknowledge(
     return EventRead(**_read(event, trigger, camera, keyframe))
 
 
-def _export_state(event: Event, trigger: str, camera: str, storage: StorageClient) -> ExportState:
-    if event.export_status == ExportStatus.DONE and _stale(event):
-        return ExportState(status=ExportStatus.NONE, exported_at=event.exported_at)
-    state = ExportState(
-        status=event.export_status, error=event.export_error, exported_at=event.exported_at
-    )
-    if event.export_status == ExportStatus.DONE:
-        state.file_name = export_file_name(trigger, camera, event.start_time)
+def _export_state(
+    session: Session,
+    event: Event,
+    trigger: str,
+    camera: str,
+    storage: StorageClient,
+    marked: bool = False,
+) -> ExportState:
+    export = _Export(event, marked)
+    status = export.get("status")
+    marks = _marks(session, event) if marked else None
+    if status == ExportStatus.DONE and _stale(event, marked, marks):
+        return ExportState(status=ExportStatus.NONE, exported_at=export.exported_at)
+    state = ExportState(status=status, error=export.get("error"), exported_at=export.exported_at)
+    if status == ExportStatus.DONE:
+        state.file_name = export_file_name(trigger, camera, event.start_time, marked=marked)
         state.url = storage.presigned_get_url(
-            storage.key_from_uri(event.export_uri), download_name=state.file_name
+            storage.key_from_uri(export.get("uri")), download_name=state.file_name
         )
     return state
 
@@ -180,43 +238,55 @@ def _export_state(event: Event, trigger: str, camera: str, storage: StorageClien
 @router.post("/{event_id}/export", response_model=ExportState, status_code=202)
 def export(
     event_id: UUID,
+    marks: bool = Query(False, description="the second file, with the marks drawn in"),
     session: Session = Depends(get_session),
     storage: StorageClient = Depends(get_storage_client),
     queue=Depends(get_export_queue),
 ) -> ExportState:
-    """Join the evidence into one MP4 in the background; an up-to-date export is reused."""
+    """Join the evidence into one MP4 in the background; an up-to-date export is reused. With
+    `marks`, refused (409) until the event's marks are done."""
     event, trigger, camera = _get(session, event_id)
-    up_to_date = event.export_status == ExportStatus.DONE and not _stale(event)
-    if up_to_date or event.export_status == ExportStatus.RUNNING:
-        return _export_state(event, trigger, camera, storage)
-    event.export_status = ExportStatus.RUNNING
-    event.export_error = None
+    row = _marks(session, event) if marks else None
+    if marks and (row is None or row.status != MarksStatus.DONE):
+        raise HTTPException(409, "the marks of this event aren't ready")
+    export = _Export(event, marks)
+    status = export.get("status")
+    up_to_date = status == ExportStatus.DONE and not _stale(event, marks, row)
+    if up_to_date or status == ExportStatus.RUNNING:
+        return _export_state(session, event, trigger, camera, storage, marks)
+    export.set("status", ExportStatus.RUNNING)
+    export.set("error", None)
     session.commit()
     try:
-        queue(event.id)
+        if marks:
+            queue(event.id, marks=True)
+        else:
+            queue(event.id)
     except Exception as error:  # noqa: BLE001 - any broker failure
-        event.export_status = ExportStatus.FAILED
-        event.export_error = "the export queue is not reachable"
+        export.set("status", ExportStatus.FAILED)
+        export.set("error", "the export queue is not reachable")
         session.commit()
         raise HTTPException(503, f"the export queue is not reachable (is Redis running?): {error}")
-    return _export_state(event, trigger, camera, storage)
+    return _export_state(session, event, trigger, camera, storage, marks)
 
 
 @router.get("/{event_id}/export", response_model=ExportState)
 def export_state(
     event_id: UUID,
+    marks: bool = Query(False, description="the file with the marks drawn in"),
     session: Session = Depends(get_session),
     storage: StorageClient = Depends(get_storage_client),
 ) -> ExportState:
     """When done: a time-limited link that downloads the MP4."""
     event, trigger, camera = _get(session, event_id)
-    return _export_state(event, trigger, camera, storage)
+    return _export_state(session, event, trigger, camera, storage, marks)
 
 
 def delete_events(session: Session, storage: StorageClient, events: list[Event]) -> None:
-    """Events with their evidence rows (database cascade) and export files (ADR 0034)."""
+    """Events with their evidence rows and marks (database cascade) and export files (ADR 0034)."""
     for event in events:
         storage.delete(export_key(event.id))
+        storage.delete(marked_export_key(event.id))
         session.delete(event)
 
 

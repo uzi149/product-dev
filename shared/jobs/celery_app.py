@@ -33,6 +33,7 @@ COMPILE_TRIGGER = "triggers.compile_trigger"
 FINISH_EVENT = "triggers.finish_event"
 EXPORT_EVENT = "events.export_event"
 TEST_TRIGGER = "triggers.test_trigger"
+MARK_EVIDENCE = "marks.mark_evidence"
 
 celery_app = Celery(
     "sentinel",
@@ -45,6 +46,7 @@ celery_app = Celery(
         "services.triggers.events",
         "services.events.export",
         "services.triggers.testing",
+        "services.marks.job",
     ],
 )
 celery_app.conf.update(
@@ -61,6 +63,8 @@ celery_app.conf.update(
         EXPORT_EVENT: {"queue": DEFAULT_QUEUE},
         # Search and verification, like a query (step 5.4).
         TEST_TRIGGER: {"queue": QUERY_QUEUE},
+        # VLM grounding of a clip (step 5.7): never in front of live analysis or an alert.
+        MARK_EVIDENCE: {"queue": QUERY_QUEUE},
     },
     task_serializer="json",
     accept_content=["json"],
@@ -92,9 +96,16 @@ def queue_test_trigger(test_id: UUID) -> None:
     celery_app.send_task(TEST_TRIGGER, args=[str(test_id)])
 
 
-def queue_export_event(event_id: UUID) -> None:
+def queue_mark_evidence(marks_id: UUID) -> None:
     """Raises when the broker (Redis) can't be reached."""
-    celery_app.send_task(EXPORT_EVENT, args=[str(event_id)])
+    celery_app.send_task(MARK_EVIDENCE, args=[str(marks_id)])
+
+
+def queue_export_event(event_id: UUID, marks: bool = False) -> None:
+    """Raises when the broker (Redis) can't be reached. `marks`: the file with the marks drawn
+    in (step 5.7)."""
+    args = [str(event_id), True] if marks else [str(event_id)]
+    celery_app.send_task(EXPORT_EVENT, args=args)
 
 
 def queue_ingest_upload(upload_id: UUID) -> None:

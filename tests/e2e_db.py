@@ -9,6 +9,7 @@
     python -m tests.e2e_db seed-event TRIGGER_ID SEGMENT_ID [--status confirmed]  # an alerted event
     python -m tests.e2e_db seed-trigger-test TRIGGER_ID SEGMENT_ID  # a finished test, 2 matches
     python -m tests.e2e_db notify EVENT_ID                        # its live notice, on Redis
+    python -m tests.e2e_db seed-marks EVENT_ID [--status skipped]  # its marks (step 5.7)
 
 The e2e stack runs with analysis off and without models, so no segment fails or gets stuck on
 its own, no query finds anything and no rule compiles; seeded queries, triggers, tests and events
@@ -31,6 +32,7 @@ from shared.database.models import (
     CompileStatus,
     Event,
     EventEvidence,
+    EvidenceMarks,
     EvidenceStatus,
     ProcessingStatus,
     QueryEvidence,
@@ -337,6 +339,43 @@ def seed_trigger_test(session: Session, trigger_id: UUID, segment_id: UUID) -> U
     return test.id
 
 
+def seed_marks(session: Session, event_id: UUID, status: str) -> UUID:
+    """Marks over the event's evidence, as the query worker leaves them (step 5.7): a person
+    walking left to right (picked) and a bag standing still (not picked)."""
+    event = session.get(Event, event_id)
+    if event is None:
+        sys.exit(f"no event {event_id}")
+    evidence = event.evidence[0]
+    span = range(evidence.start_offset_ms, evidence.end_offset_ms + 1, 200)
+    length = max(1, evidence.end_offset_ms - evidence.start_offset_ms)
+
+    def walker(ms: int) -> list:
+        x = 0.1 + 0.6 * (ms - evidence.start_offset_ms) / length
+        return [ms, round(x, 4), 0.3, round(x + 0.15, 4), 0.9]
+
+    tracks = [
+        {"id": 1, "label": "person", "kind": "person", "picked": True,
+         "runs": [{"segment_id": str(evidence.segment_id), "points": [walker(ms) for ms in span]}]},
+        {"id": 2, "label": "bag", "kind": "portable_object", "picked": False,
+         "runs": [{"segment_id": str(evidence.segment_id),
+                   "points": [[ms, 0.75, 0.7, 0.85, 0.85] for ms in span]}]},
+    ]  # fmt: skip
+    done = status == "done"
+    marks = EvidenceMarks(
+        event_id=event.id,
+        status=status,
+        reason=None if done else "Marks are off with the local model.",
+        pick_status="done" if done else None,
+        tracks_json=tracks if done else None,
+        model="e2e-seeded" if done else None,
+        evidence_updated_at=event.updated_at,
+        finished_at=datetime.now(UTC),
+    )
+    session.add(marks)
+    session.flush()
+    return marks.id
+
+
 def notify(session: Session, event_id: UUID, settings: Settings) -> None:
     """The live notice the worker sends when the event's evidence is stored (5.2)."""
     from services.triggers import notices
@@ -377,6 +416,9 @@ def main(argv: list[str] | None = None) -> int:
     test.add_argument("segment", type=UUID)
     live = commands.add_parser("notify", help="publish an event's live notice")
     live.add_argument("event", type=UUID)
+    marks = commands.add_parser("seed-marks", help="an event's marks; prints their id")
+    marks.add_argument("event", type=UUID)
+    marks.add_argument("--status", default="done", choices=["done", "skipped"])
     args = parser.parse_args(argv)
 
     settings = e2e_settings()
@@ -397,6 +439,8 @@ def main(argv: list[str] | None = None) -> int:
                 print(seed_trigger_test(session, args.trigger, args.segment))
             elif args.command == "notify":
                 notify(session, args.event, settings)
+            elif args.command == "seed-marks":
+                print(seed_marks(session, args.event, args.status))
             elif args.pending:
                 print(seed_pending(session, args.ids[0], args.text))
             else:

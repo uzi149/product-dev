@@ -56,7 +56,7 @@ test("an event plays, is confirmed with a note, exports to a download and can be
   await expect(event).toContainText("New");
 
   // The export runs for real on the e2e worker (FFmpeg).
-  const exportBox = page.getByRole("region", { name: "Export" });
+  const exportBox = page.getByRole("region", { name: "Export" }).getByRole("group", { name: "Original" });
   await exportBox.getByRole("button", { name: "Export" }).click();
   const download = exportBox.getByRole("link", { name: "Download" });
   await expect(download).toBeVisible({ timeout: 90_000 });
@@ -109,4 +109,67 @@ test("Overview counts and Settings values", async ({ page }) => {
   await expect(page.getByRole("region", { name: "Analysis" })).toContainText("12 s");
   await expect(page.getByRole("region", { name: "Triggers" })).toContainText("TRIGGERS_ENABLED");
   await expect(page.locator("body")).not.toContainText("e2e-no-model"); // never a key
+});
+
+test("marks are drawn over the evidence, switch off, and export drawn in", async ({ page }) => {
+  // Step 5.7. The e2e stack has no model: the marks are seeded as the query worker leaves them.
+  test.setTimeout(150_000);
+  const { triggerId, segmentId } = await triggerWithSegment();
+  const eventId = db("seed-event", triggerId, segmentId);
+  const withMarks = page.getByRole("region", { name: "Export" }).getByRole("group", { name: "With marks" });
+
+  // No marks yet: the marked export waits for them.
+  await page.goto(`/events/${eventId}`);
+  await expect(withMarks.getByRole("button", { name: "Export" })).toBeDisabled();
+  await expect(withMarks.getByRole("status")).toHaveText("Available once the marks are made");
+
+  db("seed-marks", eventId);
+  await page.reload();
+  const evidence = page.getByRole("region", { name: "Evidence" });
+  const marks = evidence.getByLabel("Marks", { exact: true });
+  await expect(marks).toContainText("2 people and objects marked; the ones it is about are highlighted");
+  await expect(marks.getByRole("list", { name: "Legend" })).toContainText("person");
+  const overlay = page.getByTestId("marks-overlay");
+  await expect(overlay).toBeAttached();
+  // Once the video plays, the canvas has the boxes on it.
+  await expect
+    .poll(
+      () =>
+        overlay.evaluate((canvas: HTMLCanvasElement) => {
+          const data = canvas.getContext("2d")!.getImageData(0, 0, canvas.width, canvas.height).data;
+          let drawn = 0;
+          for (let i = 3; i < data.length; i += 4) if (data[i] > 0) drawn++;
+          return drawn;
+        }),
+      { timeout: 20_000 },
+    )
+    .toBeGreaterThan(100);
+
+  await marks.getByRole("button", { name: "Marks on" }).click();
+  await expect(overlay).not.toBeAttached();
+  await expect(marks.getByRole("button", { name: "Marks off" })).toHaveAttribute("aria-pressed", "false");
+  await page.reload(); // remembered in this browser
+  await expect(page.getByRole("button", { name: "Marks off" })).toBeVisible();
+  await page.getByRole("button", { name: "Marks off" }).click();
+  await expect(page.getByTestId("marks-overlay")).toBeAttached();
+
+  // The export with the marks drawn in runs for real on the e2e worker.
+  await withMarks.getByRole("button", { name: "Export" }).click();
+  const download = withMarks.getByRole("link", { name: "Download" });
+  await expect(download).toBeVisible({ timeout: 90_000 });
+  expect(await download.getAttribute("download")).toMatch(/_marked\.mp4$/);
+  const file = await apiFetch((await download.getAttribute("href"))!);
+  expect(file.status).toBe(200);
+  expect((await file.arrayBuffer()).byteLength).toBeGreaterThan(10_000);
+});
+
+test("with the local model the event says marks are off", async ({ page }) => {
+  const { triggerId, segmentId } = await triggerWithSegment();
+  const eventId = db("seed-event", triggerId, segmentId);
+  db("seed-marks", eventId, "--status", "skipped");
+  await page.goto(`/events/${eventId}`);
+  const marks = page.getByRole("region", { name: "Evidence" }).getByLabel("Marks", { exact: true });
+  await expect(marks).toContainText("Marks are off with the local model.");
+  await expect(marks.getByRole("button")).toHaveCount(0);
+  await expect(page.getByTestId("marks-overlay")).not.toBeAttached();
 });

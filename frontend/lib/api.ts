@@ -13,6 +13,7 @@ import type {
   ExportState,
   FootageConflict,
   Health,
+  MarksState,
   QueryInput,
   QueryList,
   QueryState,
@@ -171,8 +172,17 @@ export const api = {
       `/events/${id}/acknowledge`,
       json("POST", note === undefined ? { status } : { status, note }),
     ),
-  exportEvent: (id: string) => request<ExportState>(`/events/${id}/export`, { method: "POST" }),
-  exportState: (id: string) => request<ExportState>(`/events/${id}/export`),
+  /** `marks`: the second file, with the marks drawn in (step 5.7). */
+  exportEvent: (id: string, marks = false) =>
+    request<ExportState>(`/events/${id}/export${marks ? "?marks=true" : ""}`, { method: "POST" }),
+  exportState: (id: string, marks = false) =>
+    request<ExportState>(`/events/${id}/export${marks ? "?marks=true" : ""}`),
+  eventMarks: (id: string) => request<MarksState>(`/events/${id}/marks`),
+  /** Marks a result the operator opened (step 5.7); asking again changes nothing. */
+  markResult: (queryId: string, resultId: string) =>
+    request<MarksState>(`/queries/${queryId}/results/${resultId}/marks`, { method: "POST" }),
+  resultMarks: (queryId: string, resultId: string) =>
+    request<MarksState>(`/queries/${queryId}/results/${resultId}/marks`),
   /** Deletes the event with its evidence rows and export (HTTP 204, ADR 0034). */
   deleteEvent: (id: string) => request<null>(`/events/${id}`, { method: "DELETE" }),
   /** New events as they are reported (step 5.2). */

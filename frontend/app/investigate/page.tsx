@@ -14,7 +14,8 @@ import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { readLastQuery, writeLastQuery } from "@/lib/last-query";
 import { splitResults } from "@/lib/queries";
-import type { QueryInput, QueryState, Understood } from "@/lib/types";
+import type { EvidenceItem, QueryInput, QueryState, Understood } from "@/lib/types";
+import { useResultMarks } from "@/lib/use-marks";
 import { QUERY_GONE, useQueryProgress } from "@/lib/use-query-progress";
 
 /** A query still pending after this long means no query worker is taking it. */
@@ -216,7 +217,7 @@ function InvestigateView() {
                 {selected && (
                   <section aria-label="Evidence" className="min-w-0 rounded-2xl border bg-card p-4">
                     <EvidenceDetails result={selected} />
-                    <EvidencePlayer key={selected.id} result={selected} />
+                    <ResultPlayer key={selected.id} queryId={queryId} result={selected} />
                   </section>
                 )}
               </div>
@@ -226,4 +227,10 @@ function InvestigateView() {
       </div>
     </>
   );
+}
+
+/** The opened result in the player; opening it asks for its marks (step 5.7). */
+function ResultPlayer({ queryId, result }: { queryId: string | null; result: EvidenceItem }) {
+  const marks = useResultMarks(queryId, result.id);
+  return <EvidencePlayer result={result} marks={marks.data} />;
 }

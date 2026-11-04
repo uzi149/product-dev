@@ -15,7 +15,8 @@ from services.triggers.events import (
     record_match,
 )
 from services.triggers.matching import TimedAction, window_facts
-from shared.database.models import Event, EventEvidence
+from shared.config import Settings
+from shared.database.models import Event, EventEvidence, EvidenceMarks
 from tests.triggers.conftest import SETTINGS, START, online
 
 NOT_REQUIRED = Verification("not_required")
@@ -194,6 +195,57 @@ def test_an_event_extended_after_its_alert_gets_new_evidence_without_a_new_alert
     finish(session, event, finish_tools)
     assert [p.segment_id for p in evidence(session, event)] == [first.id, second.id]
     assert len(recorder.notices) == 1
+
+
+def marks_of(session, event):
+    session.expire_all()
+    return session.scalars(select(EvidenceMarks).where(EvidenceMarks.event_id == event.id)).one()
+
+
+def test_finishing_asks_for_marks_after_the_alert_and_again_on_extension(
+    session, cameras, add_segment, add_window, add_trigger, finish_tools, recorder, clock
+):
+    """Step 5.7: the evidence is marked on the query worker; the alert never waits for it."""
+    one, _ = cameras
+    trigger = add_trigger([one], post_roll_seconds=0, pre_roll_seconds=0)
+    first = add_segment(one, 0, 30)
+    add_segment(one, 30, 30)
+    window = add_window(one, first, 0)
+    event, _ = record_match(
+        session, trigger, one.id, match(window, 4, 11), NOT_REQUIRED, 0.9, at(20)
+    )
+    session.commit()
+    clock.now = at(100)
+    finish(session, event, finish_tools)
+    row = marks_of(session, event)
+    assert row.status == "pending" and recorder.marks == [row.id]
+    assert len(recorder.notices) == 1
+
+    row.status, row.tracks_json = "done", []
+    session.commit()
+    record_match(session, trigger, one.id, match(window, 35, 40), NOT_REQUIRED, 0.9, at(100))
+    session.commit()
+    finish(session, event, finish_tools)
+    again = marks_of(session, event)
+    assert again.id == row.id and again.status == "pending"
+    assert recorder.marks == [row.id, row.id]
+
+
+def test_with_the_local_model_marks_are_skipped(
+    session, cameras, add_segment, add_window, add_trigger, finish_tools, recorder, clock
+):
+    one, _ = cameras
+    trigger = add_trigger([one], post_roll_seconds=0, pre_roll_seconds=0)
+    window = add_window(one, add_segment(one, 0, 30), 0)
+    event, _ = record_match(
+        session, trigger, one.id, match(window, 4, 11), NOT_REQUIRED, 0.9, at(20)
+    )
+    session.commit()
+    clock.now = at(100)
+    finish(session, event, finish_tools, Settings(_env_file=None, vlm_backend="local"))
+    row = marks_of(session, event)
+    assert row.status == "skipped" and "local model" in row.reason
+    assert recorder.marks == [] and len(recorder.notices) == 1
 
 
 def test_a_deleted_event_is_finished_quietly(session, held, finish_tools, recorder):

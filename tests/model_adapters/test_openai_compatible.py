@@ -101,6 +101,15 @@ def test_images_are_scaled_to_the_longest_side():
     assert sent_shape(1) == (240, 320)  # smaller frames are not enlarged
 
 
+def test_a_call_can_send_larger_pictures():
+    """Grounding (step 5.7) asks for 1024 px while descriptions keep the backend's 640."""
+    server = Server(answer())
+    client(server, image_max_side=640).complete([frame(1080, 1920)], "x", image_max_side=1024)
+    url = server.body(0)["messages"][0]["content"][0]["image_url"]["url"]
+    data = np.frombuffer(base64.b64decode(url.split(",", 1)[1]), np.uint8)
+    assert cv2.imdecode(data, 1).shape[:2] == (576, 1024)
+
+
 def test_text_only_requests_work():
     server = Server(answer("{}"))
     assert client(server).complete([], "Compile this rule.").text == "{}"

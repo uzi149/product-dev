@@ -24,7 +24,8 @@ import { EXPORT_POLL_MS, STATUS_LABEL, STATUS_TONE, delayWording, exportWording 
 import { formatDateTime } from "@/lib/format";
 import { clock } from "@/lib/queries";
 import { STATE_TONE, actionWord, percent, verificationWording } from "@/lib/triggers";
-import type { EventDetail, EventStatus } from "@/lib/types";
+import type { EventDetail, EventStatus, ExportState } from "@/lib/types";
+import { useEventMarks } from "@/lib/use-marks";
 
 export default function EventPage() {
   const { id } = useParams<{ id: string }>();
@@ -63,16 +64,7 @@ function EventView({ event }: { event: EventDetail }) {
     },
     onError: (e: Error) => toast.error(e.message),
   });
-  const exportState = useQuery({
-    queryKey: ["events", "export", event.id],
-    queryFn: () => api.exportState(event.id),
-    refetchInterval: (query) => (query.state.data?.status === "running" ? EXPORT_POLL_MS : false),
-  });
-  const startExport = useMutation({
-    mutationFn: () => api.exportEvent(event.id),
-    onSuccess: (state) => queryClient.setQueryData(["events", "export", event.id], state),
-    onError: (e: Error) => toast.error(e.message),
-  });
+  const marks = useEventMarks(event.id);
   const remove = useMutation({
     mutationFn: () => api.deleteEvent(event.id),
     onSuccess: () => {
@@ -85,7 +77,7 @@ function EventView({ event }: { event: EventDetail }) {
 
   const actions = (event.details.matches ?? []).flatMap((m) => m.actions ?? []);
   const delay = delayWording(event.delay_seconds);
-  const exp = exportState.data;
+  const marksReady = marks.data?.status === "done";
 
   return (
     <>
@@ -101,7 +93,7 @@ function EventView({ event }: { event: EventDetail }) {
       />
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(300px,0.9fr)]">
         <section aria-label="Evidence" className="min-w-0 rounded-2xl border bg-card p-4">
-          <EvidencePlayer result={event} />
+          <EvidencePlayer result={event} marks={marks.data} />
         </section>
         <div className="grid content-start gap-4">
           <section aria-label="Event" className="grid gap-2 rounded-2xl border bg-card p-4 text-sm">
@@ -179,25 +171,13 @@ function EventView({ event }: { event: EventDetail }) {
             <p className="text-xs text-muted-foreground">
               One video of the evidence, with a card where footage between the parts isn&apos;t shown.
             </p>
-            <div className="flex flex-wrap items-center gap-2">
-              {exp?.status === "done" && exp.url ? (
-                <a href={exp.url} download={exp.file_name ?? undefined} className={buttonVariants()}>
-                  <Download /> Download
-                </a>
-              ) : (
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={exp?.status === "running" || startExport.isPending}
-                  onClick={() => startExport.mutate()}
-                >
-                  <FileVideo /> {exp?.status === "failed" ? "Export again" : "Export"}
-                </Button>
-              )}
-              <span role="status" className="text-xs text-muted-foreground">
-                {exportWording(exp)}
-              </span>
-            </div>
+            <ExportRow eventId={event.id} label="Original" marked={false} />
+            <ExportRow
+              eventId={event.id}
+              label="With marks"
+              marked
+              disabledReason={marksReady ? null : "Available once the marks are made"}
+            />
           </section>
         </div>
       </div>
@@ -225,5 +205,55 @@ function EventView({ event }: { event: EventDetail }) {
         </Dialog>
       )}
     </>
+  );
+}
+
+/** One export choice (step 5.3; "With marks" step 5.7): Export, then Download when it is ready. */
+function ExportRow({
+  eventId,
+  label,
+  marked,
+  disabledReason = null,
+}: {
+  eventId: string;
+  label: string;
+  marked: boolean;
+  disabledReason?: string | null;
+}) {
+  const queryClient = useQueryClient();
+  const key = ["events", "export", eventId, marked];
+  const state = useQuery({
+    queryKey: key,
+    queryFn: () => api.exportState(eventId, marked),
+    refetchInterval: (query) => (query.state.data?.status === "running" ? EXPORT_POLL_MS : false),
+  });
+  const start = useMutation({
+    mutationFn: () => api.exportEvent(eventId, marked),
+    onSuccess: (saved: ExportState) => queryClient.setQueryData(key, saved),
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const exp = state.data;
+  return (
+    <div role="group" aria-label={label} className="flex flex-wrap items-center gap-2">
+      <span className="w-24 text-xs font-medium">{label}</span>
+      {exp?.status === "done" && exp.url ? (
+        <a href={exp.url} download={exp.file_name ?? undefined} className={buttonVariants({ size: "sm" })}>
+          <Download /> Download
+        </a>
+      ) : (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={exp?.status === "running" || start.isPending || disabledReason !== null}
+          onClick={() => start.mutate()}
+        >
+          <FileVideo /> {exp?.status === "failed" ? "Export again" : "Export"}
+        </Button>
+      )}
+      <span role="status" className="text-xs text-muted-foreground">
+        {disabledReason && exp?.status !== "done" ? disabledReason : exportWording(exp)}
+      </span>
+    </div>
   );
 }
