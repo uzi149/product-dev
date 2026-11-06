@@ -3,7 +3,8 @@
 **Events** are marked after their evidence is written (`process_finish`: the first alert and every
 extension); **Investigate results** when the operator opens one. Both run as `mark_evidence` on
 the query worker (ADR 0028), so marking never holds up an alert or live analysis. With the local
-model marks are off: the row says `skipped` and nothing is queued.
+model marks are off unless `MARKS_LOCAL_MODEL` is on (ADR 0039): the row says `skipped` and
+nothing is queued.
 
 An event extended while it is being marked is marked again. An older run never overwrites a newer
 one: the event's `updated_at` at the start of a run is stored with its marks

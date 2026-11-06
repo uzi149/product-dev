@@ -115,6 +115,18 @@ def test_ground_sends_the_grounding_size_and_reads_the_answer():
     assert vlm.calls[0]["image_max_side"] == 1000
 
 
+def test_pixel_boxes_follow_the_size_the_local_model_saw():
+    # The local processor scaled the 1000 px picture down to 644 x 364: its pixel answer is in
+    # those pixels, not the ones sent (step 5.8).
+    vlm = FakeVLM(
+        [boxes(([64.4, 36.4, 322, 182], "person"))],
+        model="Qwen/Qwen2.5-VL-3B-Instruct",
+        image_size=(644, 364),
+    )
+    found = ground(vlm, np.zeros((1080, 1920, 3), np.uint8), ["person"], image_max_side=1000)
+    assert found[0].box == pytest.approx((0.1, 0.1, 0.5, 0.5))
+
+
 @pytest.mark.parametrize(
     ("text", "expected"),
     [("[2]", [2]), ("Numbers: [1, 3]", [1, 3]), ("[]", []), ("[3, 3, 9]", [3]), ("none", None)],

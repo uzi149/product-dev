@@ -21,3 +21,21 @@ def test_the_main_settings_are_listed_without_secrets(client, monkeypatch):
     assert "secret" not in text and "sk-" not in text and "8443" not in text
     analysis = {i["label"]: i["value"] for i in sections[2]["items"]}
     assert analysis["Window"] == "12 s" and analysis["Keyframes per window"] == "6"
+
+
+def _marks_line(client, monkeypatch, local_marks: str) -> dict:
+    monkeypatch.setenv("VLM_BACKEND", "local")
+    monkeypatch.setenv("MARKS_LOCAL_MODEL", local_marks)
+    get_settings.cache_clear()
+    try:
+        sections = client.get("/settings").json()
+    finally:
+        get_settings.cache_clear()
+    marks = next(s for s in sections if s["title"] == "Evidence marks")
+    return marks["items"][0]
+
+
+def test_marks_with_the_local_model_show_their_setting(client, monkeypatch):
+    assert _marks_line(client, monkeypatch, "false")["value"] == "off with the local model"
+    line = _marks_line(client, monkeypatch, "true")
+    assert line["value"] == "on with the local model" and "MARKS_LOCAL_MODEL" in line["env"]

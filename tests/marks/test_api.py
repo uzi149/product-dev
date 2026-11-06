@@ -152,10 +152,11 @@ def result(session, camera, add_segment):
 
 @pytest.fixture
 def backend(monkeypatch):
-    """Run the API with this VLM backend."""
+    """Run the API with this VLM backend (and, for the local one, marks switched on or not)."""
 
-    def use(name: str) -> None:
+    def use(name: str, local_marks: bool = False) -> None:
         monkeypatch.setenv("VLM_BACKEND", name)
+        monkeypatch.setenv("MARKS_LOCAL_MODEL", "true" if local_marks else "false")
         get_settings.cache_clear()
 
     yield use
@@ -186,6 +187,14 @@ def test_with_the_local_model_a_result_is_not_marked(client, result, marking, ba
     state = client.post(f"/queries/{query.id}/results/{evidence.id}/marks").json()
     assert state["status"] == "skipped" and "local model" in state["reason"]
     assert marking == []
+
+
+def test_with_marks_on_for_the_local_model_a_result_is_marked(client, result, marking, backend):
+    backend("local", local_marks=True)
+    query, evidence = result
+    state = client.post(f"/queries/{query.id}/results/{evidence.id}/marks").json()
+    assert state["status"] == "pending"
+    assert len(marking) == 1
 
 
 def test_a_result_of_another_query_is_404(client, result, session):

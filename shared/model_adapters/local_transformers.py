@@ -100,6 +100,19 @@ def load_model(model_name: str, max_pixels: int) -> tuple[Any, Any]:
         return _CACHE[model_name]
 
 
+def seen_size(grid_thw: Any, patch_size: Any) -> tuple[int, int] | None:
+    """(width, height) of the one picture as the model saw it: the processor's patch grid
+    (`image_grid_thw`, one row of time, height, width in patches) times the patch size. None when
+    there is not exactly one picture or the processor does not say."""
+    if grid_thw is None or not isinstance(patch_size, int) or patch_size <= 0:
+        return None
+    rows = grid_thw.tolist() if hasattr(grid_thw, "tolist") else list(grid_thw)
+    if len(rows) != 1 or len(rows[0]) != 3:
+        return None
+    _, grid_h, grid_w = (int(v) for v in rows[0])
+    return grid_w * patch_size, grid_h * patch_size
+
+
 class LocalTransformersVLM:
     def __init__(self, model_name: str, image_max_side: int = 640):
         self.model_name = model_name
@@ -165,4 +178,8 @@ class LocalTransformersVLM:
             latency_ms=round((time.monotonic() - started) * 1000),
             prompt_tokens=int(inputs["input_ids"].shape[1]),
             completion_tokens=int(trimmed.shape[1]),
+            image_size=seen_size(
+                inputs.get("image_grid_thw"),
+                getattr(getattr(processor, "image_processor", None), "patch_size", None),
+            ),
         )
