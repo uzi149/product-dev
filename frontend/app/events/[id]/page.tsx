@@ -51,15 +51,17 @@ function EventView({ event }: { event: EventDetail }) {
   const queryClient = useQueryClient();
   const [note, setNote] = useState(event.note ?? "");
   const [deleting, setDeleting] = useState(false);
-  const refresh = () => {
-    queryClient.invalidateQueries({ queryKey: ["events"] });
-    queryClient.invalidateQueries({ queryKey: ["event-counts"] });
-    queryClient.invalidateQueries({ queryKey: ["triggers"] });
-  };
+  const refresh = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["events"] }),
+      queryClient.invalidateQueries({ queryKey: ["event-counts"] }),
+      queryClient.invalidateQueries({ queryKey: ["triggers"] }),
+    ]);
   const acknowledge = useMutation({
     mutationFn: (status: EventStatus) => api.acknowledgeEvent(event.id, status, note.trim() || null),
-    onSuccess: (saved) => {
-      refresh();
+    // Pending until the event is read again, so the buttons switch without a flash of the old ones.
+    onSuccess: async (saved) => {
+      await refresh();
       toast.success(saved.status === "new" ? "Back to review" : `Event ${STATUS_LABEL[saved.status].toLowerCase()}`);
     },
     onError: (e: Error) => toast.error(e.message),
@@ -137,26 +139,41 @@ function EventView({ event }: { event: EventDetail }) {
               onChange={(e) => setNote(e.target.value)}
             />
             <div className="flex flex-wrap gap-1.5">
-              <Button type="button" disabled={acknowledge.isPending} onClick={() => acknowledge.mutate("confirmed")}>
-                <Check /> Confirm
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={acknowledge.isPending}
-                onClick={() => acknowledge.mutate("dismissed")}
-              >
-                <X /> Dismiss
-              </Button>
-              {event.status !== "new" && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  disabled={acknowledge.isPending}
-                  onClick={() => acknowledge.mutate("new")}
-                >
-                  <Undo2 /> Back to review
-                </Button>
+              {event.status === "new" ? (
+                <>
+                  <Button type="button" disabled={acknowledge.isPending} onClick={() => acknowledge.mutate("confirmed")}>
+                    <Check /> Confirm
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={acknowledge.isPending}
+                    onClick={() => acknowledge.mutate("dismissed")}
+                  >
+                    <X /> Dismiss
+                  </Button>
+                </>
+              ) : (
+                <>
+                  {/* Reviewed: the decision takes its button's place; Back to review brings
+                      Confirm and Dismiss back. */}
+                  <Button
+                    type="button"
+                    variant={event.status === "confirmed" ? "default" : "outline"}
+                    disabled
+                    className="disabled:opacity-100"
+                  >
+                    {event.status === "confirmed" ? <Check /> : <X />} {STATUS_LABEL[event.status]}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    disabled={acknowledge.isPending}
+                    onClick={() => acknowledge.mutate("new")}
+                  >
+                    <Undo2 /> Back to review
+                  </Button>
+                </>
               )}
             </div>
             {event.acknowledged_at && (
