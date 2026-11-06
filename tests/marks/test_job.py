@@ -71,7 +71,16 @@ def test_an_events_evidence_is_marked(session, engine, event, tools):
 def test_with_the_local_model_nothing_is_queued(session, event):
     assert request_event_marks(session, event, LOCAL) is None
     session.commit()
-    assert row_of(session, event).status == "skipped"
+    row = row_of(session, event)
+    assert row.status == "skipped" and "MARKS_LOCAL_MODEL" in row.reason
+
+
+def test_the_local_model_marks_when_switched_on(session, event):
+    local_on = Settings(_env_file=None, vlm_backend="local", marks_local_model=True)
+    assert request_event_marks(session, event, local_on) is not None
+    session.commit()
+    row = row_of(session, event)
+    assert row.status == "pending" and row.reason is None
 
 
 def test_a_vlm_failure_fails_the_marks_not_the_event(session, engine, event, tools):

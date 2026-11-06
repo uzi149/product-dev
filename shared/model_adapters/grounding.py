@@ -268,6 +268,8 @@ def ground(
         image_max_side=image_max_side,
     )
     log.debug("grounding answer: %s", reply.text)
+    if reply.image_size is not None:  # the model saw a scaled copy (local model)
+        width, height = reply.image_size
     return parse_boxes(reply.text, width, height, bbox_space(vlm.name, bbox_format), labels)
 
 

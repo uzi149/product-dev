@@ -85,8 +85,9 @@ def read_settings() -> list[SettingSection]:
             ("Matches verified per test", str(s.trigger_test_verify_max), "TRIGGER_TEST_VERIFY_MAX"),
         ],
         "Evidence marks": [
-            ("Marks", _on(s.marks_enabled) if backend == "api" else "off with the local model",
-             "MARKS_ENABLED"),
+            ("Marks", _on(s.marks_enabled) if backend == "api"
+             else _on(s.marks_enabled and s.marks_local_model) + " with the local model",
+             "MARKS_ENABLED" if backend == "api" else "MARKS_ENABLED, MARKS_LOCAL_MODEL"),
             ("Boxes asked for every", f"{s.marks_keyframe_seconds:g} s", "MARKS_KEYFRAME_SECONDS"),
             ("Most pictures per clip", str(s.marks_max_keyframes), "MARKS_MAX_KEYFRAMES"),
             ("Picture size sent", f"{s.marks_image_max_side} px (longest side)", "MARKS_IMAGE_MAX_SIDE"),

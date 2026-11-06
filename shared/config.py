@@ -164,8 +164,10 @@ class Settings(BaseSettings):
 
     # Evidence marks (step 5.7, ADR 0038): boxes around the people and objects in event evidence
     # and opened Investigate results, from VLM grounding every MARKS_KEYFRAME_SECONDS (at most
-    # MARKS_MAX_KEYFRAMES per clip, sent at MARKS_IMAGE_MAX_SIDE). Never with the local model.
+    # MARKS_MAX_KEYFRAMES per clip, sent at MARKS_IMAGE_MAX_SIDE). With the local model only when
+    # MARKS_LOCAL_MODEL is on (step 5.8, ADR 0039): worth it on a GPU (CUDA, Apple MPS).
     marks_enabled: bool = True
+    marks_local_model: bool = False
     marks_keyframe_seconds: float = Field(default=1.0, gt=0)
     marks_max_keyframes: int = Field(default=60, gt=0)
     marks_image_max_side: int = Field(default=1024, ge=64)

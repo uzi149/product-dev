@@ -486,8 +486,14 @@ changes; an event's export has a second choice, **With marks**, with the boxes d
 - Events are marked by the `query` worker after their alert (the alert never waits), and again
   when the event is extended; an Investigate result when it is opened. Marks arrive a few minutes
   after the alert (one VLM call per keyframe).
-- **Off with the local model** (`VLM_BACKEND=local`, or no key): the player says so. With an API
-  key the frames go to that server: test videos only, as for every VLM call.
+- **Off with the local model** (`VLM_BACKEND=local`, or no key) unless `MARKS_LOCAL_MODEL=true`
+  (step 5.8, ADR 0039); when off, the player says so. Switch it on where the model runs on a GPU
+  (CUDA, or Apple MPS on a Mac): the keyframes are grounded one at a time, so an event's marks
+  take several minutes, and the `query` worker loads the model too (about 7.5 GB for the 3B
+  model). Lower `MARKS_MAX_KEYFRAMES` or `MARKS_IMAGE_MAX_SIDE` to make it quicker. Restart the
+  API and the workers after changing it; events and results already marked "off" stay so until
+  the event is extended. With an API key the frames go to that server: test videos only, as for
+  every VLM call.
 - `MARKS_ENABLED=false` switches them off; `VLM_BBOX_FORMAT` (`auto`) is the model's box
   coordinates: pixels for Qwen2/2.5, a 0–1000 grid for Qwen3.
 

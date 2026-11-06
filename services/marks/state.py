@@ -12,14 +12,14 @@ from shared.database.models import Event, EvidenceMarks, MarksStatus, QueryEvide
 from shared.model_adapters import resolve_vlm_backend
 from shared.schemas.marks import MarksState
 
-LOCAL_MODEL_REASON = "Marks are off with the local model."
+LOCAL_MODEL_REASON = "Marks are off with the local model (MARKS_LOCAL_MODEL turns them on)."
 ABANDONED_AFTER = timedelta(minutes=30)
 
 
 def _off_reason(settings: Settings) -> str | None:
     if not settings.marks_enabled:
         return "Marks are switched off (MARKS_ENABLED)."
-    if resolve_vlm_backend(settings) == "local":
+    if resolve_vlm_backend(settings) == "local" and not settings.marks_local_model:
         return LOCAL_MODEL_REASON
     return None
 

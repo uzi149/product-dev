@@ -19,6 +19,9 @@ class VLMReply:
     latency_ms: int
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
+    # (width, height) of the one picture as the model saw it, when the backend knows it (the local
+    # model's processor scales pictures down; Qwen2.5-VL boxes are pixels of that picture).
+    image_size: tuple[int, int] | None = None
 
 
 class VLMError(Exception):

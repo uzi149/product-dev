@@ -14,9 +14,15 @@ class FakeVLM:
     """A VLM with scripted answers. Each item of `replies` is the text to answer, an exception
     to raise, or a function of (frames, prompt) returning the text. The last item repeats."""
 
-    def __init__(self, replies: list[str | VLMError | Callable], model: str = "fake-vlm"):
+    def __init__(
+        self,
+        replies: list[str | VLMError | Callable],
+        model: str = "fake-vlm",
+        image_size: tuple[int, int] | None = None,
+    ):
         self.replies = list(replies)
         self.model = model
+        self.image_size = image_size  # what a local model reports it saw
         self.calls: list[dict] = []
 
     @property
@@ -34,7 +40,7 @@ class FakeVLM:
         if isinstance(reply, VLMError):
             raise reply
         text = reply(frames, prompt) if callable(reply) else reply
-        return VLMReply(text=text, model=self.model, latency_ms=1)
+        return VLMReply(text=text, model=self.model, latency_ms=1, image_size=self.image_size)
 
 
 def fake_vector(key: bytes) -> np.ndarray:
