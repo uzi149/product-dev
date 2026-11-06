@@ -49,11 +49,18 @@ test("an event plays, is confirmed with a note, exports to a download and can be
   await expect(event).toContainText("New");
 
   await page.getByLabel("Note").fill("a real bag");
-  await page.getByRole("button", { name: "Confirm" }).click();
+  const review = page.getByRole("region", { name: "Review" });
+  await review.getByRole("button", { name: "Confirm", exact: true }).click();
   await expect(event).toContainText("Confirmed");
-  await expect(page.getByRole("region", { name: "Review" })).toContainText("“a real bag”");
-  await page.getByRole("button", { name: "Back to review" }).click();
+  await expect(review).toContainText("“a real bag”");
+  // Confirmed takes the place of the buttons until the event goes back to review.
+  await expect(review.getByRole("button", { name: "Confirmed", exact: true })).toBeDisabled();
+  await expect(review.getByRole("button", { name: "Confirm", exact: true })).toHaveCount(0);
+  await expect(review.getByRole("button", { name: "Dismiss", exact: true })).toHaveCount(0);
+  await review.getByRole("button", { name: "Back to review" }).click();
   await expect(event).toContainText("New");
+  await expect(review.getByRole("button", { name: "Confirm", exact: true })).toBeEnabled();
+  await expect(review.getByRole("button", { name: "Confirmed", exact: true })).toHaveCount(0);
 
   // The export runs for real on the e2e worker (FFmpeg).
   const exportBox = page.getByRole("region", { name: "Export" }).getByRole("group", { name: "Original" });
