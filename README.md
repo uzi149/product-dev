@@ -414,7 +414,20 @@ python -m shared.model_adapters.check_vlm photo.jpg        # your own picture(s)
 python -m shared.model_adapters.check_vlm --backend local  # force the in-process model
 ```
 
-It prints the backend, the model, the time taken, the token counts and the answer. Tests that
+It prints the backend, the model, the time taken, the token counts and the answer.
+
+Check the OpenRouter key's spend and what is left, without calling a model (free):
+
+```bash
+python -m shared.model_adapters.check_openrouter                       # the model in VLM_MODEL
+python -m shared.model_adapters.check_openrouter --model google/gemma-4-31b-it:free  # any model id
+python -m shared.model_adapters.check_openrouter --estimate 2500 300   # cost of one call (tokens in, out)
+```
+
+It prints the key's spending cap and what is left of it, the spend today, this week, this month
+and in total, the free-model (`:free`) requests used today (50 a day before 10 credits are
+bought, 1000 after; 20 a minute), and each model's price and whether it accepts images. The
+account's balance needs a management key, so it is not shown. Tests that
 call the real models are marked `models` and run only with `RUN_MODEL_TESTS=1`
 (`RUN_MODEL_TESTS=1 pytest -m models`); CI never runs them.
 
