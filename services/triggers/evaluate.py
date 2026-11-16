@@ -111,6 +111,18 @@ def enabled_triggers(session: Session, camera_id: UUID) -> list[Trigger]:
     )
 
 
+def watched_texts(session: Session, camera_id: UUID) -> list[str]:
+    """What the analysis names in its prompt (ADR 0041): the search text of the camera's enabled,
+    compiled semantic triggers. Structured triggers have their action words already."""
+    texts = []
+    for trigger in enabled_triggers(session, camera_id):
+        rule = trigger.compiled_rule_json or {}
+        text = rule.get("search_text")
+        if rule.get("mode") == "semantic" and isinstance(text, str) and text.strip():
+            texts.append(text.strip())
+    return list(dict.fromkeys(texts))
+
+
 def facts(row: AnalysisWindow) -> WindowFacts:
     return window_facts(
         row.id,

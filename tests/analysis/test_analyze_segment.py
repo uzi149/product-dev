@@ -395,3 +395,69 @@ def test_a_failing_evaluation_never_fails_the_window(
     _analyse(engine, storage, segment, Settings(_env_file=None), _NoFinish())
     assert status(session, segment) == "done"
     assert all(w.processing_status == "done" for w in windows(session, segment))
+
+
+def _trigger(session, cameras, mode, search_text, enabled=True):
+    from shared.database.models import Trigger
+
+    trigger = Trigger(
+        name=search_text,
+        natural_language_rule=f"Report when {search_text}",
+        compiled_rule_json={
+            "mode": mode,
+            "required_entities": ["person"],
+            "required_action_sequence": [] if mode == "semantic" else ["enter"],
+            "maximum_sequence_gap_seconds": 30,
+            "requires_vlm_verification": True,
+            "search_text": search_text,
+            "source_rule": f"Report when {search_text}",
+            "prompt_version": 3,
+        },
+        compile_status="done",
+        enabled=enabled,
+    )
+    trigger.cameras = cameras
+    session.add(trigger)
+    session.commit()
+    return trigger
+
+
+def test_the_cameras_semantic_triggers_are_named_in_the_prompt(
+    session, camera, make_segment, run, video_30s
+):
+    """ADR 0041: only this camera's enabled semantic triggers; not structured or disabled ones,
+    nor another camera's."""
+    other = Camera(display_name="Other cam", source_type="file")
+    session.add(other)
+    session.commit()
+    _trigger(session, [camera], "semantic", "someone using a mobile phone")
+    _trigger(session, [camera], "structured", "someone enters")
+    _trigger(session, [camera], "semantic", "someone smoking", enabled=False)
+    _trigger(session, [other], "semantic", "a dog on the sofa")
+    segment = make_segment(video_30s)
+    vlm = FakeVLM([GOOD])
+    run(segment, vlm)
+    prompt = vlm.calls[0]["prompt"]
+    assert 'This camera is watched for: "someone using a mobile phone".' in prompt
+    for absent in ("someone enters", "someone smoking", "a dog on the sofa"):
+        assert absent not in prompt
+    (first, *_) = windows(session, segment)
+    assert first.structured_observation_json["watched_for"] == ["someone using a mobile phone"]
+    assert first.structured_observation_json["prompt_version"] == prompts.PROMPT_VERSION
+
+
+def test_naming_the_triggers_can_be_switched_off(
+    session, camera, make_segment, engine, storage, video_30s
+):
+    _trigger(session, [camera], "semantic", "someone using a mobile phone")
+    segment = make_segment(video_30s)
+    vlm = FakeVLM([GOOD])
+    process_segment(
+        segment.id,
+        session_factory=lambda: Session(engine),
+        storage=storage,
+        settings=Settings(_env_file=None, analysis_watch_triggers=False),
+        models=Models(vlm, FakeTextEmbedder(), FakeImageEmbedder()),
+    )
+    assert "watched for" not in vlm.calls[0]["prompt"]
+    assert windows(session, segment)[0].structured_observation_json["watched_for"] == []

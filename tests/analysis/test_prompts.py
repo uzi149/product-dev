@@ -43,3 +43,16 @@ def test_the_prompt_has_a_version():
 def test_entities_are_limited_to_what_takes_part():
     text = " ".join(prompts.describe_prompt("Car park", TIMES, 12.0).split())
     assert "at most 10" in text and "Do not list parked cars" in text
+
+
+def test_what_the_triggers_look_for_is_named_only_when_there_is_something():
+    """ADR 0041: a phone in a hand isn't volunteered unless the model is told to look for it."""
+    assert "watched for" not in prompts.describe_prompt("Office", TIMES, 12.0)
+    text = prompts.describe_prompt("Office", TIMES, 12.0, ["someone using a mobile phone"])
+    assert 'This camera is watched for: "someone using a mobile phone".' in text
+    assert "Do not mention them if you can't see them" in text
+    many = [f"thing {n}" for n in range(8)]
+    text = prompts.describe_prompt("Office", TIMES, 12.0, many)
+    assert '"thing 4"' in text and '"thing 5"' not in text  # at most MAX_WATCHED
+    retry = prompts.retry_prompt("bad", "Office", TIMES, 12.0, ["someone smoking"])
+    assert '"someone smoking"' in retry

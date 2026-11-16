@@ -156,6 +156,9 @@ class Settings(BaseSettings):
     # TRIGGER_FINISH_POLL_SECONDS, at most max_segment_seconds + TRIGGER_FINISH_MARGIN_SECONDS
     # after the post-roll.
     triggers_enabled: bool = True
+    # Trigger-aware analysis (ADR 0041): the analysis prompt names what the camera's enabled
+    # semantic triggers look for, so the description says so when it is seen.
+    analysis_watch_triggers: bool = True
     trigger_semantic_min_score: float = Field(default=0.6, ge=0, le=1)
     trigger_semantic_verified_min_score: float = Field(default=0.25, ge=0, le=1)
     trigger_finish_poll_seconds: int = Field(default=10, gt=0)

@@ -10,11 +10,15 @@ observations from different prompts can be told apart.
 """
 
 import json
+from collections.abc import Sequence
 
 from shared.schemas.observation import ACTION_VOCABULARY
 
 # 2: entities limited to what takes part (busy scenes listed every parked car and were cut off).
-PROMPT_VERSION = 2
+# 3: the camera's semantic triggers are named, so the summary says when one is seen (ADR 0041).
+PROMPT_VERSION = 3
+# At most this many watched things are named in the prompt.
+MAX_WATCHED = 5
 # A busy scene with 10 entities and 10 actions takes about 700 tokens; room for more.
 MAX_ANSWER_TOKENS = 1200
 
@@ -61,13 +65,33 @@ _FIELDS = """\
 - overall_confidence: 0 to 1, how sure you are of this description."""
 
 
-def describe_prompt(camera_name: str, frame_seconds: list[float], window_seconds: float) -> str:
-    """The user message that follows the frames. `frame_seconds` are relative to the clip."""
+def watch_note(watch_for: Sequence[str]) -> str:
+    """What the camera's semantic triggers look for (ADR 0041): named so the summary says so when
+    it is seen, since the model doesn't volunteer small things like a phone in a hand."""
+    if not watch_for:
+        return ""
+    things = "; ".join(f'"{text}"' for text in watch_for[:MAX_WATCHED])
+    return (
+        f"This camera is watched for: {things}. If you clearly see one of these, say so in the "
+        "summary in those words and name the objects involved in visible_objects. Do not "
+        "mention them if you can't see them.\n\n"
+    )
+
+
+def describe_prompt(
+    camera_name: str,
+    frame_seconds: list[float],
+    window_seconds: float,
+    watch_for: Sequence[str] = (),
+) -> str:
+    """The user message that follows the frames. `frame_seconds` are relative to the clip;
+    `watch_for` is what the camera's semantic triggers look for."""
     times = ", ".join(f"frame {n} at {t:.1f} s" for n, t in enumerate(frame_seconds, 1))
     return (
         f"These {len(frame_seconds)} frames are sampled in order from one {window_seconds:.0f} s "
         f'clip of camera "{camera_name}": {times}. Describe the clip as one continuous scene. '
         "Never mention frames or images, and do not describe them one by one.\n\n"
+        f"{watch_note(watch_for)}"
         "Respond with VALID JSON ONLY containing these fields:\n"
         f"{_FIELDS}\n\n"
         f"Action words: {', '.join(ACTION_VOCABULARY)}.\n\n"
@@ -79,12 +103,16 @@ def describe_prompt(camera_name: str, frame_seconds: list[float], window_seconds
 
 
 def retry_prompt(
-    problem: str, camera_name: str, frame_seconds: list[float], window_seconds: float
+    problem: str,
+    camera_name: str,
+    frame_seconds: list[float],
+    window_seconds: float,
+    watch_for: Sequence[str] = (),
 ) -> str:
     """The stricter prompt, used once after an answer that could not be used."""
     return (
         f"Your previous answer could not be used: {problem}. Answer again, following the rules "
         "exactly. Your whole answer must be one JSON object that starts with { and ends with }, "
         "with a non-empty summary, and no other text.\n\n"
-        + describe_prompt(camera_name, frame_seconds, window_seconds)
+        + describe_prompt(camera_name, frame_seconds, window_seconds, watch_for)
     )
