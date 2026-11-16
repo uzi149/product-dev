@@ -40,6 +40,28 @@ def test_a_rule_without_vocabulary_actions_is_semantic(vlm):
     assert "crowd" in rule.search_text.lower()
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Report when someone is using mobile phone",
+        "Alert if anyone is talking on the phone",
+        "Report when someone is smoking",
+        "Report when a person is eating at their desk",
+    ],
+)
+def test_using_something_is_semantic(vlm, text):
+    """No action word covers it; carry_object would never match a seated phone user (ADR 0040)."""
+    rule = compile_rule(vlm, text)
+    print(f"\n{rule.model_dump_json(indent=1)}")
+    assert rule.mode == "semantic", rule.required_action_sequence
+
+
+def test_moving_an_object_stays_structured(vlm):
+    rule = compile_rule(vlm, "Report when someone carries a box out of the room")
+    print(f"\n{rule.model_dump_json(indent=1)}")
+    assert rule.mode == "structured" and "carry_object" in rule.required_action_sequence
+
+
 def test_a_time_in_the_rule_becomes_the_gap(vlm):
     rule = compile_rule(vlm, "Report when a vehicle arrives and then leaves within 2 minutes")
     print(f"\n{rule.model_dump_json(indent=1)}")

@@ -149,12 +149,15 @@ class Settings(BaseSettings):
     query_verify_min_confidence: float = Field(default=0.6, ge=0, le=1)
 
     # Live trigger evaluation (step 5.2, ADR 0033): every analysed window is checked against the
-    # enabled triggers of its camera. Semantic rules match at this hybrid score or more. A match
+    # enabled triggers of its camera. Semantic rules match at this hybrid score or more; at the
+    # lower TRIGGER_SEMANTIC_VERIFIED_MIN_SCORE when the VLM will check the frames (the rule asks
+    # for verification and the backend is the API, ADR 0040). A match
     # is held until the footage up to its post-roll is stored: checked every
     # TRIGGER_FINISH_POLL_SECONDS, at most max_segment_seconds + TRIGGER_FINISH_MARGIN_SECONDS
     # after the post-roll.
     triggers_enabled: bool = True
     trigger_semantic_min_score: float = Field(default=0.6, ge=0, le=1)
+    trigger_semantic_verified_min_score: float = Field(default=0.25, ge=0, le=1)
     trigger_finish_poll_seconds: int = Field(default=10, gt=0)
     trigger_finish_margin_seconds: int = Field(default=30, ge=0)
     # Trigger tests (step 5.4, ADR 0035): candidates from search, then at most this many

@@ -9,7 +9,8 @@ camera are loaded.
     structured   the rule's actions in order within its gap, the last one in this window, and
                  its entity classes seen (matching.py)
     semantic     this window's hybrid score (4.2) for the rule's search text, at least
-                 TRIGGER_SEMANTIC_MIN_SCORE
+                 TRIGGER_SEMANTIC_MIN_SCORE; at least TRIGGER_SEMANTIC_VERIFIED_MIN_SCORE when
+                 the VLM will check the frames (ADR 0040)
     verification as for search results (4.4): verified at QUERY_VERIFY_MIN_CONFIDENCE; rejected
                  makes no event; a failed verification, or the local model, still alerts, marked
     confidence   the verification's when verified, else the lowest of the deciding windows'
@@ -148,6 +149,16 @@ def structured_match(
     return Match("structured", found[1], found[0]) if found else None
 
 
+def semantic_min_score(rule: CompiledRule, settings) -> float:
+    """The score a semantic match needs (ADR 0040). A rule about what a person is doing (using a
+    phone) often gets only a side clause in the description, so it scores low; when the VLM will
+    check the frames anyway (the rule asks for it, and the backend is the API, not the local
+    model, which skips verification), the lower bar lets those matches through to the check."""
+    if rule.requires_vlm_verification and resolve_vlm_backend(settings) != "local":
+        return settings.trigger_semantic_verified_min_score
+    return settings.trigger_semantic_min_score
+
+
 def semantic_scores(
     session: Session,
     rule: CompiledRule,
@@ -172,7 +183,7 @@ def semantic_match(
     score = semantic_scores(
         session, rule, [current.id], tools.text_embedder, tools.image_embedder, tools.settings
     ).get(current.id)
-    if score is None or score < tools.settings.trigger_semantic_min_score:
+    if score is None or score < semantic_min_score(rule, tools.settings):
         return None
     return Match("semantic", [facts(current)], score=round(score, 3))
 

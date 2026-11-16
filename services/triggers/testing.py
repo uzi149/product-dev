@@ -8,8 +8,9 @@ settings, and never creates events:
                 inside the cameras and range
     checking    structured rules: 5.2's matcher replayed on each candidate's neighbourhood (every
                 window as the one completing the match); semantic rules: the candidates at
-                TRIGGER_SEMANTIC_MIN_SCORE or more. Matches closer than the cooldown on one camera
-                are one would-be event, as live.
+                the same score as live (TRIGGER_SEMANTIC_MIN_SCORE, or the lower
+                TRIGGER_SEMANTIC_VERIFIED_MIN_SCORE when the VLM verifies, ADR 0040). Matches
+                closer than the cooldown on one camera are one would-be event, as live.
     verifying   when the rule asks, the VLM checks up to TRIGGER_TEST_VERIFY_MAX would-be events
                 (none with the local model, ADR 0033)
     done        every would-be event with its verdict: would report, rejected by the VLM, or below
@@ -31,6 +32,7 @@ from services.query_engine.retrieval import search
 from services.triggers.evaluate import (
     confidence_of,
     facts,
+    semantic_min_score,
     semantic_scores,
     verify_match,
 )
@@ -149,10 +151,11 @@ def semantic_matches(
         r.id: r
         for r in session.scalars(select(AnalysisWindow).where(AnalysisWindow.id.in_(list(scores))))
     }
+    minimum = semantic_min_score(rule, tools.settings)
     return [
         (rows[window_id].camera_id, Match("semantic", [facts(rows[window_id])], score=round(s, 3)))
         for window_id, s in scores.items()
-        if s >= tools.settings.trigger_semantic_min_score and window_id in rows
+        if s >= minimum and window_id in rows
     ]
 
 

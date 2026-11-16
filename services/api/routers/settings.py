@@ -82,6 +82,7 @@ def read_settings() -> list[SettingSection]:
         "Triggers": [
             ("Live evaluation", _on(s.triggers_enabled), "TRIGGERS_ENABLED"),
             ("Similarity rules match at", f"{s.trigger_semantic_min_score:g}", "TRIGGER_SEMANTIC_MIN_SCORE"),
+            ("Verified similarity rules match at", f"{s.trigger_semantic_verified_min_score:g}", "TRIGGER_SEMANTIC_VERIFIED_MIN_SCORE"),
             ("Matches verified per test", str(s.trigger_test_verify_max), "TRIGGER_TEST_VERIFY_MAX"),
         ],
         "Evidence marks": [
