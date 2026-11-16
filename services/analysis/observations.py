@@ -7,6 +7,7 @@ decides whether to retry.
 
 import logging
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
@@ -99,8 +100,9 @@ def describe_window(
     camera_name: str,
     frame_seconds: list[float],
     window_seconds: float,
+    watch_for: Sequence[str] = (),
 ) -> Described:
-    prompt = prompts.describe_prompt(camera_name, frame_seconds, window_seconds)
+    prompt = prompts.describe_prompt(camera_name, frame_seconds, window_seconds, watch_for)
     for attempt in (1, 2):
         reply = vlm.complete(
             frames,
@@ -118,7 +120,9 @@ def describe_window(
                     f"the model did not return a valid observation ({error})"
                 ) from error
             log.info("%s gave an unusable answer (%s); asking again", reply.model, error)
-            prompt = prompts.retry_prompt(str(error), camera_name, frame_seconds, window_seconds)
+            prompt = prompts.retry_prompt(
+                str(error), camera_name, frame_seconds, window_seconds, watch_for
+            )
     raise AssertionError("unreachable")
 
 

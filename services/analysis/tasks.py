@@ -27,9 +27,9 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from services.analysis.observations import describe_window, index_text
-from services.analysis.prompts import PROMPT_VERSION
+from services.analysis.prompts import MAX_WATCHED, PROMPT_VERSION
 from services.analysis.windows import Window, keyframe_id, keyframe_times, plan_windows, window_id
-from services.triggers.evaluate import TriggerTools, evaluate_window
+from services.triggers.evaluate import TriggerTools, evaluate_window, watched_texts
 from services.triggers.events import FinishTools, default_finish_tools
 from shared.config import Settings, get_settings
 from shared.database.index_settings import IndexSettingsMismatch, ensure_index_settings
@@ -156,6 +156,11 @@ def _process(
         )
     )
     todo = [w for w in windows if window_id(segment.id, w.number) not in done]
+    watch_for = (
+        watched_texts(session, camera.id)
+        if todo and settings.triggers_enabled and settings.analysis_watch_triggers
+        else []
+    )
     if todo:
         with tempfile.TemporaryDirectory(prefix="sentinel-analysis-") as tmp:
             video = Path(tmp, "segment.mp4")
@@ -163,7 +168,15 @@ def _process(
                 storage.download_file(storage.key_from_uri(segment.storage_uri), video)
                 for window, frames in _window_frames(video, todo, settings.keyframes_per_window):
                     _analyse_window(
-                        session, storage, settings, models, segment, camera, window, frames
+                        session,
+                        storage,
+                        settings,
+                        models,
+                        segment,
+                        camera,
+                        window,
+                        frames,
+                        watch_for,
                     )
             except (NotFound, FrameReadError, _Refused) as error:
                 session.rollback()
@@ -233,9 +246,11 @@ def _analyse_window(
     camera: Camera,
     window: Window,
     frames: list[tuple[float, np.ndarray]],
+    watch_for: list[str],
 ) -> None:
-    """Analyse one window. A window the model can't describe is `failed` and the next one
-    follows; a refused request raises _Refused, because every other window would fail too."""
+    """Analyse one window, naming what the camera's semantic triggers look for (ADR 0041). A
+    window the model can't describe is `failed` and the next one follows; a refused request
+    raises _Refused, because every other window would fail too."""
     _set_window(session, segment, window, ProcessingStatus.PROCESSING)
     session.commit()
     pictures = [resize_max_side(frame, settings.snapshot_width) for _, frame in frames]
@@ -246,6 +261,7 @@ def _analyse_window(
             camera.display_name,
             [t - window.start for t, _ in frames],
             window.seconds,
+            watch_for,
         )
     except InvalidObservation as error:
         log.warning("segment %s window %d: %s", segment.id, window.number, error)
@@ -274,6 +290,7 @@ def _analyse_window(
     row.structured_observation_json = {
         **observation.model_dump(),
         "prompt_version": PROMPT_VERSION,
+        "watched_for": watch_for[:MAX_WATCHED],
         "attempts": described.attempts,
         "latency_ms": reply.latency_ms,
         "prompt_tokens": reply.prompt_tokens,

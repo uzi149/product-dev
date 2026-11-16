@@ -150,6 +150,19 @@ def test_the_prompt_has_the_rule_the_vocabulary_and_the_classes():
     assert "portable_object" in call["prompt"] and call["system"] == compile_prompt.SYSTEM_PROMPT
 
 
+def test_the_prompt_keeps_using_something_out_of_the_action_words():
+    """Using a phone, smoking, eating: no action word covers them, and carry_object is moving
+    an object, not holding it (ADR 0040), so such rules become semantic."""
+    prompt = compile_prompt.compile_prompt("Report when someone is smoking")
+    assert "using a phone" in prompt and "smoking" in prompt
+    assert "carry_object means moving an object" in prompt
+    phone = "Report when someone is using a mobile phone"
+    example = dict(compile_prompt.EXAMPLES)[phone]
+    assert f'Rule: "{phone}"' in prompt
+    assert example["required_action_sequence"] == []
+    assert read_rule(json.dumps(example), phone, None).mode == "semantic"
+
+
 def test_an_unusable_answer_is_asked_again_once():
     vlm = FakeVLM(["no idea", LEFT_BEHIND])
     assert compile_rule(vlm, RULE).mode == "structured"

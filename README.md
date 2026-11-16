@@ -472,7 +472,13 @@ Every analysed window is checked right away against the enabled triggers **of it
 CAM-02. A structured rule needs its actions in order within its gap (across earlier windows of
 the camera, the last action in the new window) and its entity classes; a semantic rule needs the
 window's search score for the rule (as on Investigate) to reach `TRIGGER_SEMANTIC_MIN_SCORE`
-(0.6). When the rule asks for it, the VLM verifies the match on the stored keyframes: rejected
+(0.6), or `TRIGGER_SEMANTIC_VERIFIED_MIN_SCORE` (0.25) when the rule asks for verification and the
+backend is the API, so the VLM checks every such match on the frames (ADR 0040). A rule about what
+someone is doing with something, without moving it ("using a mobile phone", "smoking"), has no
+action word and is compiled as semantic. The analysis prompt names what the camera's enabled
+semantic triggers look for, so the description says so when it is seen (ADR 0041,
+`ANALYSIS_WATCH_TRIGGERS`); only footage analysed while the trigger is enabled is helped. When the
+rule asks for it, the VLM verifies the match on the stored keyframes: rejected
 makes no event; with the local model, or when the VLM fails, the event is created anyway and
 marked "not verified" / "couldn't be verified". The confidence is the verification's, else the
 lowest window's, and must reach the trigger's minimum. The same trigger on the same camera within

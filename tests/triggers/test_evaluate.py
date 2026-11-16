@@ -9,9 +9,10 @@ import pytest
 from sqlalchemy import select
 
 from services.triggers import evaluate as evaluate_module
-from services.triggers.evaluate import enabled_triggers, evaluate_window
+from services.triggers.evaluate import enabled_triggers, evaluate_window, semantic_min_score
 from shared.database.models import Event, EventEvidence
 from shared.model_adapters import VLMUnavailable
+from shared.schemas.trigger import CompiledRule
 from tests.fakes import FakeVLM
 from tests.search.conftest import Q_PICTURE, Q_TEXT, TEXT, near
 from tests.triggers.conftest import SETTINGS, rule
@@ -252,6 +253,21 @@ def test_a_semantic_rule_matches_by_score(
     match = event.details_json["matches"][0]
     assert event.details_json["mode"] == "semantic" and match["score"] >= 0.6
     assert len(TEXT.queries) == asked + 1  # the rule's vectors are computed once per worker
+
+
+@pytest.mark.parametrize(
+    ("verify", "backend", "expected"),
+    [
+        (True, "api", 0.25),  # the VLM checks the frames: the lower bar
+        (False, "api", 0.6),  # nothing checks a weak match
+        (True, "local", 0.6),  # the local model skips verification
+    ],
+)
+def test_the_semantic_bar_is_lower_only_when_the_vlm_checks(verify, backend, expected):
+    """ADR 0040: "using a mobile phone" scored 0.25-0.40 on real footage, other windows < 0.1."""
+    compiled = CompiledRule.model_validate({**SEMANTIC, "requires_vlm_verification": verify})
+    settings = SETTINGS.model_copy(update={"vlm_backend": backend})
+    assert semantic_min_score(compiled, settings) == expected
 
 
 def test_an_event_is_only_finished_once_its_footage_is_stored(

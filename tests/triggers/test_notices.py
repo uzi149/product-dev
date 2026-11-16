@@ -53,4 +53,14 @@ def test_dates_are_sent_as_text():
     from datetime import UTC, datetime
 
     publish(Recording(), {"event_id": "e-1", "at": datetime(2026, 3, 7, tzinfo=UTC)})
-    assert sent == [("events", {"event_id": "e-1", "at": "2026-03-07 00:00:00+00:00"})]
+    from services.triggers import notices
+
+    message = {"event_id": "e-1", "at": "2026-03-07 00:00:00+00:00"}
+    assert sent == [(notices.CHANNEL, message)]
+
+
+def test_tests_never_publish_on_the_apps_channel():
+    """The development UI listens on `events`; a test notice there shows as a false alert."""
+    from services.triggers import notices
+
+    assert notices.CHANNEL != "events"

@@ -15,7 +15,9 @@ from shared.schemas.trigger import DEFAULT_GAP_SECONDS, MAX_GAP_SECONDS, MIN_GAP
 
 # 2: alternative action sequences (the analysis may say leave_object_behind instead of
 # place_object then leave).
-PROMPT_VERSION = 2
+# 3: what a person does with something without moving it (using a phone, smoking) has no action
+# word: an empty sequence, so the rule is matched on the description (ADR 0040).
+PROMPT_VERSION = 3
 MAX_ANSWER_TOKENS = 400
 
 SYSTEM_PROMPT = (
@@ -47,6 +49,17 @@ EXAMPLES = [
             "search_text": "a crowd gathers near the entrance",
         },
     ),
+    (
+        "Report when someone is using a mobile phone",
+        {
+            "required_entities": ["person", "portable_object"],
+            "required_action_sequence": [],
+            "alternative_action_sequences": [],
+            "maximum_sequence_gap_seconds": 30,
+            "requires_vlm_verification": True,
+            "search_text": "someone using a mobile phone",
+        },
+    ),
 ]
 
 _FIELDS = f"""\
@@ -54,7 +67,10 @@ _FIELDS = f"""\
   portable_object means bags, boxes, packages and other things a person can carry.
 - required_action_sequence: the action words the rule needs, in the order they must happen,
   only from the action words below. Use an empty list when the rule describes a state or a
-  scene rather than actions the words cover.
+  scene rather than actions the words cover, and when it is about what a person is doing with
+  something without moving it (using a phone or a laptop, smoking, eating, drinking, reading):
+  no action word covers that. carry_object means moving an object from one place to another,
+  not holding or using it.
 - alternative_action_sequences: other action sequences, from the same action words, that
   describe the same event in different words (a camera description may say one action where
   the rule names two, or the reverse); an empty list if there are none.

@@ -62,6 +62,18 @@ def analysis_queue(monkeypatch) -> list:
     return queued
 
 
+@pytest.fixture(autouse=True)
+def no_live_alerts(monkeypatch):
+    """No test alerts the running app. Notices go to a channel of their own (the development
+    UI listens on the real one and would show a toast for an event of the scratch database),
+    and no event check or marking is sent to the real Celery queue."""
+    from services.triggers import events, notices
+
+    monkeypatch.setattr(notices, "CHANNEL", "events:test")
+    monkeypatch.setattr(events, "queue_finish", lambda event_id, seconds: None)
+    monkeypatch.setattr(events, "queue_marks", lambda marks_id: None)
+
+
 def _admin_connect(settings: Settings) -> psycopg.Connection:
     return psycopg.connect(
         host=settings.postgres_host,
