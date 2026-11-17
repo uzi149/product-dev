@@ -9,7 +9,8 @@ person walking across a segment boundary stays one track. A gap ends every track
 2. Each keyframe is grounded by the VLM, `marks_concurrency` at a time. A failed keyframe is
    skipped (the tracks bridge it); when every one fails the clip fails.
 3. Each run is read once more, frame by frame, for the tracker and the optical flow.
-4. With two or more tracks, one call per batch picks the ones the question is about.
+4. One call per batch of tracks picks the ones the question is about; only those are shown
+   (ADR 0042), so a single track is checked too.
 """
 
 import logging
@@ -158,7 +159,7 @@ def build_marks(
 
     # 4. The pick.
     pick_status = "none"
-    if len(tracks) >= 2:
+    if tracks:
         candidates = {t["id"]: sightings.get(t["id"], []) for t in tracks}
         picked = pick_tracks(vlm, question, candidates, images.get)
         if picked is None:

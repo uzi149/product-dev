@@ -19,6 +19,13 @@ from services.marks.labels import grounding_labels
             ["person", "portable_object"],
             ["person", "bag", "backpack", "suitcase", "box", "package"],
         ),
+        # The ways a rule names a phone are one word to ground, not the default bag words.
+        (
+            "report when someone is seen as using mobile someone using a mobile phone",
+            ["person", "portable_object"],
+            ["person", "mobile phone"],
+        ),
+        ("a man on his cellphone", [], ["person", "mobile phone"]),
         ("a vehicle stops at the gate", [], ["vehicle"]),
         ("parking", ["vehicle"], ["car", "truck", "van", "bicycle", "motorcycle"]),
         # A class from the compiled rule that the text doesn't name.

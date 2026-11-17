@@ -59,16 +59,16 @@ def test_a_walker_is_one_track_that_follows_them(tmp_path):
     walker = Mover("person", seed=1, x0=10, speed=40)
     segment = uuid4()
     path = write_clip(tmp_path / "clip.avi", 6, [walker])
-    vlm = FakeVLM([grounder([walker])])
+    vlm = FakeVLM([grounder([walker], pick="[1]")])
 
     built = build_marks(manifest(part(segment, 0, 6_000)), {segment: path}, vlm, ["person"],
                         "a person walks by", settings())  # fmt: skip
 
     assert built.keyframes == 6 and built.grounded == 6
-    assert built.pick_status == "none"  # one track: nothing to pick
+    assert built.pick_status == "done"  # a single track is checked too (ADR 0042)
     assert len(built.tracks) == 1
     track = built.tracks[0]
-    assert (track["label"], track["kind"], track["picked"]) == ("person", "person", False)
+    assert (track["label"], track["kind"], track["picked"]) == ("person", "person", True)
     points = track["runs"][0]["points"]
     assert track["runs"][0]["segment_id"] == str(segment)
     gaps = [b[0] - a[0] for a, b in itertools.pairwise(points)]
@@ -77,7 +77,18 @@ def test_a_walker_is_one_track_that_follows_them(tmp_path):
         shown = boxes_at(built.tracks, built.pick_status, str(segment), ms)
         assert len(shown) == 1
         assert shown[0].box == pytest.approx(walker.box(ms / 1000), abs=0.03)
-    assert all(c["image_max_side"] == 1024 for c in vlm.calls)
+    assert all(c["image_max_side"] == 1024 for c in vlm.calls[:-1])  # the last call is the pick
+
+
+def test_a_single_track_the_question_is_not_about_is_not_shown(tmp_path):
+    walker = Mover("person", seed=1, x0=10, speed=40)
+    segment = uuid4()
+    path = write_clip(tmp_path / "clip.avi", 3, [walker])
+    built = build_marks(manifest(part(segment, 0, 3_000)), {segment: path},
+                        FakeVLM([grounder([walker], pick="[]")]), ["person"],
+                        "someone using a mobile phone", settings())  # fmt: skip
+    assert built.pick_status == "done" and not built.tracks[0]["picked"]
+    assert boxes_at(built.tracks, built.pick_status, str(segment), 1_500) == []
 
 
 def test_the_pick_marks_the_one_the_question_is_about(tmp_path):
@@ -94,9 +105,12 @@ def test_the_pick_marks_the_one_the_question_is_about(tmp_path):
     assert built.pick_status == "done"
     assert {(t["label"], t["picked"]) for t in built.tracks} == {("person", False), ("bag", True)}
     assert "a bag is left" in vlm.calls[-1]["prompt"]
+    # Only the picked track is drawn.
+    shown = boxes_at(built.tracks, built.pick_status, str(segment), 1_500)
+    assert [s.label for s in shown] == ["bag"]
 
 
-def test_an_unusable_pick_shows_every_track_the_same(tmp_path):
+def test_an_unusable_pick_shows_no_track(tmp_path):
     person = Mover("person", seed=1, x0=10, speed=30, y=20)
     bag = Mover("bag", seed=5, x0=200, speed=0, y=150)
     segment = uuid4()
@@ -105,7 +119,8 @@ def test_an_unusable_pick_shows_every_track_the_same(tmp_path):
     built = build_marks(manifest(part(segment, 0, 3_000)), {segment: path}, vlm, [], "q",
                         settings())  # fmt: skip
     assert built.pick_status == "failed"
-    assert all(s.strong for s in boxes_at(built.tracks, built.pick_status, str(segment), 1_500))
+    assert len(built.tracks) == 2  # stored, but not shown: nothing says which it is about
+    assert boxes_at(built.tracks, built.pick_status, str(segment), 1_500) == []
 
 
 def test_a_gap_ends_every_track(tmp_path):

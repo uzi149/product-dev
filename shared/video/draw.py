@@ -34,7 +34,7 @@ NOT_PICKED_COLOUR = (150, 150, 150)
 class Shown:
     label: str
     kind: str | None
-    strong: bool  # picked, or no pick was made
+    strong: bool  # always true: only the tracks the clip is about are shown (ADR 0042)
     box: tuple[float, float, float, float]  # 0-1
 
 
@@ -62,19 +62,23 @@ def track_box_at(points: list[list], ms: float) -> tuple[float, float, float, fl
 def boxes_at(
     tracks: list[dict[str, Any]], pick_status: str | None, segment_id: str, ms: float
 ) -> list[Shown]:
-    """Every track's box in `segment_id` at `ms` (milliseconds in the segment)."""
+    """The box, in `segment_id` at `ms` (milliseconds in the segment), of every track the clip is
+    about (ADR 0042): the picked ones. A failed pick shows nothing; marks stored before every
+    clip was picked ("none") are shown as they were."""
+    if pick_status == "failed":
+        return []
     picking = pick_status == "done"
     shown: list[Shown] = []
     for track in tracks:
+        if picking and not track["picked"]:
+            continue
         for run in track["runs"]:
             if str(run["segment_id"]) != str(segment_id):
                 continue
             box = track_box_at(run["points"], ms)
             if box is not None:
-                strong = track["picked"] or not picking
-                shown.append(Shown(track["label"], track.get("kind"), strong, box))
-    # The ones the clip is about are drawn last, on top.
-    return sorted(shown, key=lambda s: s.strong)
+                shown.append(Shown(track["label"], track.get("kind"), True, box))
+    return shown
 
 
 def draw_marks(frame: np.ndarray, shown: list[Shown]) -> np.ndarray:

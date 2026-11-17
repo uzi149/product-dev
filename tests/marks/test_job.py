@@ -61,7 +61,7 @@ def test_an_events_evidence_is_marked(session, engine, event, tools):
     assert row.status == "done" and row.reason is None
     assert row.model == "fake-vlm" and row.prompt_version == 1 and row.keyframes == 5
     assert row.evidence_updated_at == event.updated_at and row.finished_at == at(500)
-    assert row.pick_status == "none"
+    assert row.pick_status == "done"  # the fake picks none: a single track is checked too
     state = marks_state(row)
     assert [t.label for t in state.tracks] == ["person"] and not state.updating
     # The trigger's rule names "someone" and "an object": person and the object words.

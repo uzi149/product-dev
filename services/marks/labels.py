@@ -22,6 +22,9 @@ _DEFAULT_WORDS: dict[EntityClass, tuple[str, ...]] = {
     "portable_object": ("bag", "backpack", "suitcase", "box", "package"),
     "animal": ("animal",),
 }
+# One word to ground for the ways a rule names the same thing ("using mobile", "cell phone").
+_SAME_THING = {"mobile": "mobile phone", "phone": "mobile phone", "cellphone": "mobile phone",
+               "smartphone": "mobile phone"}  # fmt: skip
 _IRREGULAR = {"people": "person", "persons": "person", "men": "man", "women": "woman",
               "children": "child", "buses": "bus", "boxes": "box"}  # fmt: skip
 _WORD = re.compile(r"[a-z]+")
@@ -53,6 +56,7 @@ def grounding_labels(text: str, classes: Iterable[str] = ()) -> list[str]:
         if kind == "person" or raw in _VAGUE:
             continue
         word = _singular(raw, SYNONYMS[kind])
+        word = _SAME_THING.get(word, word)
         named.add(kind)
         if word not in words:
             words.append(word)
