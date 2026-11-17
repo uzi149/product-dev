@@ -27,7 +27,7 @@ export interface ShownMark {
   id: number;
   label: string;
   colour: string;
-  /** Picked, or no pick was made: thick with a label. Otherwise a thin grey box. */
+  /** Always true: only the tracks the clip is about are shown (ADR 0042). */
   strong: boolean;
   box: Box;
 }
@@ -52,20 +52,26 @@ export function markColour(track: MarkTrack, strong: boolean): string {
   return track.kind ? KIND_COLOUR[track.kind] : OTHER_COLOUR;
 }
 
-/** Every track's box in `segmentId` at `ms` (milliseconds in the segment); strong ones last. */
+/** The tracks the clip is about (ADR 0042): the picked ones. A failed pick shows none; marks
+ * stored before every clip was picked ("none") are shown as they were. */
+export function shownTracks(marks: MarksState): MarkTrack[] {
+  if (marks.pick_status === "failed") return [];
+  if (marks.pick_status === "done") return marks.tracks.filter((t) => t.picked);
+  return marks.tracks;
+}
+
+/** The box of every shown track in `segmentId` at `ms` (milliseconds in the segment). */
 export function boxesAt(marks: MarksState, segmentId: string, ms: number): ShownMark[] {
-  const picking = marks.pick_status === "done";
   const shown: ShownMark[] = [];
-  for (const track of marks.tracks) {
+  for (const track of shownTracks(marks)) {
     for (const run of track.runs) {
       if (run.segment_id !== segmentId) continue;
       const box = trackBoxAt(run.points, ms);
       if (!box) continue;
-      const strong = track.picked || !picking;
-      shown.push({ id: track.id, label: track.label, colour: markColour(track, strong), strong, box });
+      shown.push({ id: track.id, label: track.label, colour: markColour(track, true), strong: true, box });
     }
   }
-  return shown.sort((a, b) => Number(a.strong) - Number(b.strong));
+  return shown;
 }
 
 /** Where the picture is inside a box of `boxW` x `boxH` showing a `videoW` x `videoH` video with
@@ -83,17 +89,15 @@ export function pictureRect(
   return { x: (boxW - width) / 2, y: (boxH - height) / 2, width, height };
 }
 
-/** One entry per label and colour, for the legend: the picked ones first. */
+/** One entry per label and colour of the shown tracks, for the legend. */
 export function legend(marks: MarksState): { label: string; colour: string; strong: boolean }[] {
-  const picking = marks.pick_status === "done";
   const seen = new Map<string, { label: string; colour: string; strong: boolean }>();
-  for (const track of marks.tracks) {
-    const strong = track.picked || !picking;
-    const colour = markColour(track, strong);
+  for (const track of shownTracks(marks)) {
+    const colour = markColour(track, true);
     const key = `${track.label}|${colour}`;
-    if (!seen.has(key)) seen.set(key, { label: track.label, colour, strong });
+    if (!seen.has(key)) seen.set(key, { label: track.label, colour, strong: true });
   }
-  return [...seen.values()].sort((a, b) => Number(b.strong) - Number(a.strong));
+  return [...seen.values()];
 }
 
 export function marksBusy(marks: MarksState | undefined): boolean {
@@ -114,15 +118,12 @@ export function marksWording(marks: MarksState | undefined): string {
       return `Marks couldn't be made: ${marks.reason ?? "unknown error"}`;
     case "done": {
       if (marks.tracks.length === 0) return "Nothing was found to mark.";
-      const n = marks.tracks.length;
-      const marked = `${n} ${n === 1 ? "person or object" : "people and objects"} marked`;
-      if (marks.pick_status === "done") {
-        const picked = marks.tracks.filter((t) => t.picked).length;
-        return picked > 0
-          ? `${marked}; the ones it is about are highlighted, the others grey`
-          : `${marked}; none looked like what it is about, all grey`;
+      if (marks.pick_status === "failed") {
+        return "The marks couldn't be narrowed to what this is about, so none are shown.";
       }
-      return marked;
+      const n = shownTracks(marks).length;
+      if (n === 0) return "None of the people or objects found looked like what this is about.";
+      return `${n} ${n === 1 ? "person or object" : "people and objects"} it is about marked`;
     }
     default:
       return "";

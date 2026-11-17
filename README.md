@@ -498,8 +498,8 @@ Event evidence and opened Investigate results show **where** the people and obje
 5.7, ADR 0038): the VLM is asked for boxes about once a second of the clip (at most
 `MARKS_MAX_KEYFRAMES`, 60, sent at 1024 px), the boxes are linked into tracks and followed
 between those pictures with optical flow, and one more call picks the tracks the trigger or
-question is about. The player draws them over the video: the ones the clip is about in colour
-with a label, the others thin and grey; **Marks on/off** hides them. The footage itself never
+question is about. The player draws only those over the video, in colour with a label (none
+when that call fails); **Marks on/off** hides them. The footage itself never
 changes; an event's export has a second choice, **With marks**, with the boxes drawn in.
 
 - Events are marked by the `query` worker after their alert (the alert never waits), and again

@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   HOLD_MS,
   KIND_COLOUR,
-  NOT_PICKED_COLOUR,
   boxesAt,
   legend,
   marksBusy,
@@ -57,21 +56,33 @@ describe("marks", () => {
     expect(trackBoxAt(points, 1000)).toBeNull();
   });
 
-  it("shows only the segment playing, picked tracks strong and on top", () => {
+  it("shows only the picked tracks, in the segment playing", () => {
     const state = marks(
       [track(1, "bag", "portable_object", true, [0.5, 0.5]), track(2, "person", "person", false, [0.1, 0.2])],
       "done",
     );
     const shown = boxesAt(state, SEGMENT, 100);
     expect(shown.map((s) => [s.label, s.strong, s.colour])).toEqual([
-      ["person", false, NOT_PICKED_COLOUR],
       ["bag", true, KIND_COLOUR.portable_object],
     ]);
     expect(boxesAt(state, "other-segment", 100)).toEqual([]);
   });
 
-  it("without a pick every track is strong", () => {
-    const state = marks([track(1, "person", "person", false, [0.1, 0.2])], "failed");
+  it("shows nothing when the pick failed or picked none", () => {
+    const tracks = [track(1, "person", "person", false, [0.1, 0.2])];
+    expect(boxesAt(marks(tracks, "failed"), SEGMENT, 0)).toEqual([]);
+    expect(boxesAt(marks(tracks, "done"), SEGMENT, 0)).toEqual([]);
+    expect(legend(marks(tracks, "failed"))).toEqual([]);
+    expect(marksWording(marks(tracks, "failed"))).toBe(
+      "The marks couldn't be narrowed to what this is about, so none are shown.",
+    );
+    expect(marksWording(marks(tracks, "done"))).toBe(
+      "None of the people or objects found looked like what this is about.",
+    );
+  });
+
+  it("shows marks stored before every clip was picked", () => {
+    const state = marks([track(1, "person", "person", false, [0.1, 0.2])], "none");
     expect(boxesAt(state, SEGMENT, 0)[0].strong).toBe(true);
   });
 
@@ -82,7 +93,7 @@ describe("marks", () => {
     expect(pictureRect(800, 600, 1920, 1080)).toEqual({ x: 0, y: 75, width: 800, height: 450 });
   });
 
-  it("builds a legend, picked first", () => {
+  it("builds a legend of the picked tracks", () => {
     const state = marks(
       [
         track(1, "person", "person", false, [0.1]),
@@ -91,10 +102,7 @@ describe("marks", () => {
       ],
       "done",
     );
-    expect(legend(state)).toEqual([
-      { label: "bag", colour: KIND_COLOUR.portable_object, strong: true },
-      { label: "person", colour: NOT_PICKED_COLOUR, strong: false },
-    ]);
+    expect(legend(state)).toEqual([{ label: "bag", colour: KIND_COLOUR.portable_object, strong: true }]);
   });
 
   it("words the state", () => {
@@ -109,7 +117,7 @@ describe("marks", () => {
     );
     expect(marksWording(base)).toBe("Nothing was found to mark.");
     expect(marksWording(marks([track(1, "person", "person", true, [0.1])], "done"))).toBe(
-      "1 person or object marked; the ones it is about are highlighted, the others grey",
+      "1 person or object it is about marked",
     );
     expect(marksBusy({ ...base, status: "pending" })).toBe(true);
     expect(marksBusy(base)).toBe(false);

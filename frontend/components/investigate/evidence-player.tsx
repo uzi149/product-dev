@@ -8,6 +8,7 @@ import { api } from "@/lib/api";
 import {
   legend,
   marksWording,
+  shownTracks,
   readMarksVisible,
   subscribeMarksVisible,
   writeMarksVisible,
@@ -43,7 +44,7 @@ export function EvidencePlayer({
   // On in the server's HTML; the browser's choice once hydrated.
   const marksVisible = useSyncExternalStore(subscribeMarksVisible, readMarksVisible, () => true);
   const toggleMarks = () => writeMarksVisible(!marksVisible);
-  const hasMarks = (marks?.tracks.length ?? 0) > 0;
+  const hasMarks = marks ? shownTracks(marks).length > 0 : false;
 
   const entry = entries[index];
   // The video part on screen: the current one, or (during a gap card) the one before it.

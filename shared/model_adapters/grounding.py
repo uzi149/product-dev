@@ -369,8 +369,8 @@ def pick_tracks(
     frame_of: Callable[[int], np.ndarray | None],
 ) -> set[int] | None:
     """The track ids the question is about. `candidates`: track id -> (keyframe, box) sightings;
-    `frame_of(keyframe)` gives that keyframe's picture. None when an answer can't be used (every
-    track is then shown the same)."""
+    `frame_of(keyframe)` gives that keyframe's picture. None when an answer can't be used (no
+    track is then shown, ADR 0042)."""
     crops: list[tuple[int, list[np.ndarray]]] = []
     for track_id, sightings in candidates.items():
         views = []
@@ -391,7 +391,7 @@ def pick_tracks(
             reply = vlm.complete(
                 images, prompt, max_tokens=PICK_MAX_TOKENS, image_max_side=_CROP_SIDE * 2
             )
-        except Exception as error:  # noqa: BLE001 - any failure: show every track the same
+        except Exception as error:  # noqa: BLE001 - any failure: the pick failed
             log.warning("picking tracks failed: %s", error)
             return None
         numbers = parse_pick(reply.text, len(batch))

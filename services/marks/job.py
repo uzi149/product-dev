@@ -69,7 +69,10 @@ def _target(session: Session, row: EvidenceMarks) -> _Target | None:
         manifest = event_manifest(event, rows)
         rule = trigger.compiled_rule_json or {}
         question = trigger.natural_language_rule
-        labels = grounding_labels(question, rule.get("required_entities") or [])
+        # The compiled search text names the thing when the operator's wording doesn't
+        # ("using mobile" -> "someone using a mobile phone").
+        named = f"{question} {rule.get('search_text') or ''}"
+        labels = grounding_labels(named, rule.get("required_entities") or [])
         return _Target(manifest, question, labels, event.updated_at,
                        {s.id: s.storage_uri for _, s in rows})  # fmt: skip
     evidence = session.get(QueryEvidence, row.query_evidence_id)
